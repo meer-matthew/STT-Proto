@@ -1,142 +1,81 @@
-import { useEffect, useState } from 'react';
-import Voice, {
-    SpeechResultsEvent,
-    SpeechErrorEvent,
-    SpeechVolumeChangeEvent,
-} from '@react-native-voice/voice';
-import { Platform, PermissionsAndroid } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice/voice';
 
 export function useSpeechToText() {
     const [isRecording, setIsRecording] = useState(false);
     const [transcript, setTranscript] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isAvailable, setIsAvailable] = useState(false);
-    const [audioLevel, setAudioLevel] = useState(0);
+    const [audioLevel, setAudioLevel] = useState(0); // Not available for device-based recognition
+
+    const onSpeechStart = useCallback(() => {
+        console.log('Speech recognition started');
+        setError(null);
+    }, []);
+
+    const onSpeechEnd = useCallback(() => {
+        console.log('Speech recognition ended');
+        setIsRecording(false);
+    }, []);
+
+    const onSpeechResults = useCallback((event: SpeechResultsEvent) => {
+        if (event.value && event.value.length > 0) {
+            const recognizedText = event.value[0];
+            console.log('Speech recognized:', recognizedText);
+            setTranscript(recognizedText);
+        }
+    }, []);
+
+    const onSpeechError = useCallback((event: SpeechErrorEvent) => {
+        console.error('Speech recognition error:', event.error);
+        setError(event.error?.message || 'Speech recognition failed');
+        setIsRecording(false);
+    }, []);
 
     useEffect(() => {
         // Check if speech recognition is available
-        Voice.isAvailable()
-            .then((available) => {
-                setIsAvailable(available === 1);
-            })
-            .catch(() => {
-                setIsAvailable(false);
-            });
+        Voice.isAvailable().then((available) => {
+            setIsAvailable(available === 1);
+        });
 
         // Set up event listeners
         Voice.onSpeechStart = onSpeechStart;
         Voice.onSpeechEnd = onSpeechEnd;
         Voice.onSpeechResults = onSpeechResults;
-        Voice.onSpeechPartialResults = onSpeechPartialResults;
         Voice.onSpeechError = onSpeechError;
-        Voice.onSpeechVolumeChanged = onSpeechVolumeChanged;
 
         return () => {
             // Clean up
             Voice.destroy().then(Voice.removeAllListeners);
         };
-    }, []);
-
-    const onSpeechStart = () => {
-        setIsRecording(true);
-        setError(null);
-    };
-
-    const onSpeechEnd = () => {
-        setIsRecording(false);
-    };
-
-    const onSpeechResults = (event: SpeechResultsEvent) => {
-        if (event.value && event.value.length > 0) {
-            setTranscript(event.value[0]);
-        }
-    };
-
-    const onSpeechPartialResults = (event: SpeechResultsEvent) => {
-        if (event.value && event.value.length > 0) {
-            setTranscript(event.value[0]);
-        }
-    };
-
-    const onSpeechError = (event: SpeechErrorEvent) => {
-        setError(event.error?.message || 'Speech recognition error');
-        setIsRecording(false);
-        setAudioLevel(0);
-    };
-
-    const onSpeechVolumeChanged = (event: SpeechVolumeChangeEvent) => {
-        // Volume comes as a value typically between -2 and 10
-        // Normalize it to 0-10 scale
-        if (event.value !== undefined) {
-            const normalized = Math.max(0, Math.min(10, event.value + 2));
-            setAudioLevel(normalized);
-        }
-    };
-
-    const requestMicrophonePermission = async (): Promise<boolean> => {
-        if (Platform.OS === 'android') {
-            try {
-                const granted = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-                    {
-                        title: 'Microphone Permission',
-                        message: 'This app needs access to your microphone for speech-to-text',
-                        buttonNeutral: 'Ask Me Later',
-                        buttonNegative: 'Cancel',
-                        buttonPositive: 'OK',
-                    }
-                );
-                return granted === PermissionsAndroid.RESULTS.GRANTED;
-            } catch (err) {
-                console.warn(err);
-                return false;
-            }
-        }
-        return true; // iOS permissions handled via Info.plist
-    };
+    }, [onSpeechStart, onSpeechEnd, onSpeechResults, onSpeechError]);
 
     const startRecording = async () => {
-        console.log('Starting recording...');
-        setTranscript('');
-        setError(null);
-
-        // Check if Voice is available
         if (!isAvailable) {
-            setError('Speech recognition is not available');
-            console.error('Speech recognition is not available');
-            return;
-        }
-
-        const hasPermission = await requestMicrophonePermission();
-        console.log('Microphone permission:', hasPermission);
-
-        if (!hasPermission) {
-            setError('Microphone permission denied');
-            console.error('Microphone permission denied');
+            setError('Speech recognition is not available on this device');
             return;
         }
 
         try {
-            // Stop any ongoing recording first
-            await Voice.stop();
-            await Voice.cancel();
-
-            console.log('Calling Voice.start...');
-            await Voice.start('en-US'); // You can change the language code
-            console.log('Voice.start called successfully');
+            setTranscript('');
+            setError(null);
+            await Voice.start('en-US');
             setIsRecording(true);
-        } catch (err) {
-            setError('Failed to start recording');
-            console.error('Error starting recording:', err);
+        } catch (err: any) {
+            console.error('Error starting speech recognition:', err);
+            setError(err.message || 'Failed to start speech recognition');
+            setIsRecording(false);
         }
     };
 
     const stopRecording = async () => {
         try {
             await Voice.stop();
-        } catch (err) {
-            setError('Failed to stop recording');
-            console.error(err);
+            setIsRecording(false);
+        } catch (err: any) {
+            console.error('Error stopping speech recognition:', err);
+            setError(err.message || 'Failed to stop speech recognition');
+            setIsRecording(false);
         }
     };
 
@@ -145,8 +84,9 @@ export function useSpeechToText() {
             await Voice.cancel();
             setTranscript('');
             setIsRecording(false);
-        } catch (err) {
-            console.error(err);
+            setError(null);
+        } catch (err: any) {
+            console.error('Error canceling speech recognition:', err);
         }
     };
 

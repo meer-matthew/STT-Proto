@@ -76,7 +76,7 @@ Stores conversation sessions.
 |--------|------|-------------|-------------|
 | id | Integer | Primary Key | Unique conversation identifier |
 | user_id | Integer | Foreign Key (users.id), Not Null, Indexed | Reference to user who owns the conversation |
-| configuration | String(20) | Not Null | Conversation configuration (e.g., "1:1", "2:1", "3:1") |
+| configuration | String(20) | Not Null | Meeting setup/configuration (e.g., "1:1", "2:1", "3:1") |
 | created_at | DateTime | Not Null, Default: now() | Conversation creation timestamp |
 | updated_at | DateTime | Not Null, Auto-update | Last update timestamp |
 | is_active | Boolean | Not Null, Default: True | Conversation active status |

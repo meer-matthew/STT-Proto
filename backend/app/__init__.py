@@ -20,8 +20,8 @@ def create_app():
 
     # Database configuration
     basedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or \
-        'sqlite:///' + os.path.join(basedir, 'stt.db')
+    db_path = os.path.join(basedir, 'stt.db')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or f'sqlite:///{db_path}'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     # Initialize extensions with app
@@ -32,9 +32,10 @@ def create_app():
     from app import models
 
     # Register blueprints
-    from app.routes import conversation, health
+    from app.routes import conversation, health, auth
     app.register_blueprint(conversation.bp)
     app.register_blueprint(health.bp)
+    app.register_blueprint(auth.bp)
 
     # Create database tables
     with app.app_context():

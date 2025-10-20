@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import { useTheme } from '../context/ThemeContext';
 
 type SoundMeterProps = {
     level: number; // 0-10 scale
@@ -8,6 +9,8 @@ type SoundMeterProps = {
 };
 
 export function SoundMeter({ level, isRecording }: SoundMeterProps) {
+    const theme = useTheme();
+
     if (!isRecording) {
         return null;
     }
@@ -22,9 +25,9 @@ export function SoundMeter({ level, isRecording }: SoundMeterProps) {
 
     // Get color based on level
     const getColor = () => {
-        if (isTooLoud) return '#e74c3c'; // Red
-        if (isGood) return '#27ae60'; // Green
-        return '#f39c12'; // Orange (too quiet)
+        if (isTooLoud) return theme.colors.error;
+        if (isGood) return theme.colors.primary;
+        return theme.colors.warning;
     };
 
     // Get status text
@@ -41,10 +44,12 @@ export function SoundMeter({ level, isRecording }: SoundMeterProps) {
         return 'volume-up';
     };
 
+    const styles = createStyles(theme);
+
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Icon name={getIcon()} size={20} color={getColor()} />
+                <Icon name={getIcon()} size={28} color={getColor()} />
                 <Text style={[styles.statusText, { color: getColor() }]}>
                     {getStatusText()}
                 </Text>
@@ -70,12 +75,12 @@ export function SoundMeter({ level, isRecording }: SoundMeterProps) {
             <View style={styles.barsContainer}>
                 {[...Array(10)].map((_, index) => {
                     const isActive = index < Math.floor(normalizedLevel / 10);
-                    let barColor = '#e0e0e0';
+                    let barColor = theme.colors.borderLight;
 
                     if (isActive) {
-                        if (index >= 8) barColor = '#e74c3c'; // Red bars
-                        else if (index >= 3) barColor = '#27ae60'; // Green bars
-                        else barColor = '#f39c12'; // Orange bars
+                        if (index >= 8) barColor = theme.colors.error;
+                        else if (index >= 3) barColor = theme.colors.primary;
+                        else barColor = theme.colors.warning;
                     }
 
                     return (
@@ -94,7 +99,7 @@ export function SoundMeter({ level, isRecording }: SoundMeterProps) {
             {/* Warning message for too loud */}
             {isTooLoud && (
                 <View style={styles.warningContainer}>
-                    <Icon name="exclamation-triangle" size={14} color="#e74c3c" />
+                    <Icon name="exclamation-triangle" size={24} color={theme.colors.error} />
                     <Text style={styles.warningText}>
                         Please lower your voice to avoid distortion
                     </Text>
@@ -104,62 +109,66 @@ export function SoundMeter({ level, isRecording }: SoundMeterProps) {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
     container: {
-        backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        padding: 16,
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: '#e0e0e0',
+        backgroundColor: theme.colors.white,
+        borderRadius: theme.borderRadius.lg,
+        padding: theme.spacing.lg,
+        marginHorizontal: theme.spacing.lg,
+        marginBottom: theme.spacing.lg,
+        borderWidth: theme.borderWidth.thick,
+        borderColor: theme.colors.border,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        marginBottom: 12,
+        gap: theme.spacing.sm,
+        marginBottom: theme.spacing.md,
     },
     statusText: {
-        fontSize: 16,
-        fontWeight: '600',
+        fontSize: 22,
+        fontWeight: '700',
     },
     meterContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        marginBottom: 12,
+        gap: theme.spacing.md,
+        marginBottom: theme.spacing.md,
     },
     meterBackground: {
         flex: 1,
-        height: 24,
-        backgroundColor: '#e0e0e0',
-        borderRadius: 12,
+        height: 36,
+        backgroundColor: theme.colors.borderLight,
+        borderRadius: 18,
         overflow: 'hidden',
+        borderWidth: theme.borderWidth.medium,
+        borderColor: '#c0c0c0',
     },
     meterFill: {
         height: '100%',
-        borderRadius: 12,
+        borderRadius: 18,
         transition: 'width 0.2s ease',
     },
     levelText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#666',
-        minWidth: 45,
+        fontSize: theme.fontSize.xl,
+        fontWeight: '700',
+        color: theme.colors.text,
+        minWidth: 60,
         textAlign: 'right',
     },
     barsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        gap: 4,
-        marginBottom: 8,
+        gap: 6,
+        marginBottom: theme.spacing.sm,
     },
     bar: {
         flex: 1,
-        height: 32,
-        borderRadius: 4,
-        backgroundColor: '#e0e0e0',
+        height: 48,
+        borderRadius: 6,
+        backgroundColor: theme.colors.borderLight,
+        borderWidth: theme.borderWidth.medium,
+        borderColor: '#c0c0c0',
     },
     barActive: {
         opacity: 1,
@@ -167,16 +176,19 @@ const styles = StyleSheet.create({
     warningContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        backgroundColor: '#fee',
-        padding: 8,
-        borderRadius: 8,
-        marginTop: 8,
+        gap: theme.spacing.sm,
+        backgroundColor: theme.colors.errorLight,
+        padding: theme.spacing.md,
+        borderRadius: theme.borderRadius.md,
+        marginTop: theme.spacing.sm,
+        borderWidth: theme.borderWidth.medium,
+        borderColor: '#ff9999',
     },
     warningText: {
         flex: 1,
-        fontSize: 12,
-        color: '#e74c3c',
-        lineHeight: 16,
+        fontSize: theme.fontSize.lg,
+        fontWeight: '700',
+        color: '#c0392b',
+        lineHeight: 24,
     },
 });

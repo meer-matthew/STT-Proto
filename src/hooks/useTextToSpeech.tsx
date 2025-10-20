@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Tts from 'react-native-tts';
+import { Platform } from 'react-native';
 
 export function useTextToSpeech() {
     const [isSpeaking, setIsSpeaking] = useState(false);
@@ -14,13 +15,74 @@ export function useTextToSpeech() {
                     await Tts.setDefaultLanguage('en-US');
                 }
 
-                // Set default rate and pitch
+                // Get available voices and select the best one
+                try {
+                    const voices = await Tts.voices();
+                    console.log('Available voices:', voices);
+
+                    // Find the best quality voice based on platform
+                    let bestVoice = null;
+
+                    if (Platform.OS === 'ios') {
+                        // Prioritize enhanced/premium iOS voices
+                        // Look for: Enhanced, Premium, Siri, or neural voices
+                        const priorityPatterns = [
+                            /enhanced/i,
+                            /premium/i,
+                            /siri/i,
+                            /neural/i,
+                            /(samantha|alex|karen|daniel|moira|fiona)/i, // High-quality iOS voices
+                        ];
+
+                        for (const pattern of priorityPatterns) {
+                            bestVoice = voices.find((v: any) =>
+                                pattern.test(v.name) && v.language.startsWith('en-')
+                            );
+                            if (bestVoice) break;
+                        }
+                    } else if (Platform.OS === 'android') {
+                        // Prioritize Google neural voices on Android
+                        const priorityPatterns = [
+                            /neural/i,
+                            /wavenet/i,
+                            /google/i,
+                            /en-us-x/i, // Google's high-quality voices
+                        ];
+
+                        for (const pattern of priorityPatterns) {
+                            bestVoice = voices.find((v: any) =>
+                                pattern.test(v.name || v.id) && v.language.startsWith('en-')
+                            );
+                            if (bestVoice) break;
+                        }
+                    }
+
+                    // Fallback to first English voice if no premium voice found
+                    if (!bestVoice) {
+                        bestVoice = voices.find((v: any) => v.language.startsWith('en-'));
+                    }
+
+                    if (bestVoice) {
+                        console.log('Selected voice:', bestVoice);
+                        // Use voice ID for Android, name for iOS
+                        const voiceId = bestVoice.id || bestVoice.name;
+                        if (voiceId) {
+                            Tts.setDefaultVoice(voiceId);
+                        }
+                    }
+                } catch (voiceError) {
+                    console.log('Voice selection error:', voiceError);
+                }
+
+                // Set improved rate and pitch for more natural speech
                 if (Tts.setDefaultRate) {
-                    Tts.setDefaultRate(0.5);
+                    // Slightly faster than default for more natural conversation
+                    Tts.setDefaultRate(0.55, true);
                 }
 
                 if (Tts.setDefaultPitch) {
-                    Tts.setDefaultPitch(1.0);
+                    // Slightly higher pitch for friendlier tone
+                    Tts.setDefaultPitch(1.1);
                 }
             } catch (error) {
                 console.log('TTS initialization error:', error);

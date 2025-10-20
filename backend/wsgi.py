@@ -1,9 +1,9 @@
+"""
+WSGI entry point for the Flask application.
+This file ensures the app can be run from any directory.
+"""
 import sys
 import os
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Add the backend directory to Python path
 backend_dir = os.path.dirname(os.path.abspath(__file__))

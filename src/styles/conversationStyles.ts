@@ -3,7 +3,7 @@ import { StyleSheet } from 'react-native';
 export const conversationStyles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#fafafa',
     },
     splitContainer: {
         flex: 1,
@@ -16,25 +16,28 @@ export const conversationStyles = StyleSheet.create({
     },
     conversationPanel: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#fafafa',
     },
     conversationHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+        borderBottomWidth: 3,
+        borderBottomColor: '#d0d0d0',
+        backgroundColor: '#fff',
     },
     toggleButton: {
-        padding: 16,
+        padding: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        minWidth: 60,
+        minHeight: 60,
     },
     scrollContainer: {
         flexGrow: 1,
-        paddingBottom: 16,
+        paddingBottom: 24,
     },
     messagesContainer: {
-        paddingTop: 16,
+        paddingTop: 24,
         flex: 1,
     },
     emptyStateContainer: {
@@ -45,16 +48,17 @@ export const conversationStyles = StyleSheet.create({
         paddingTop: 60,
     },
     emptyStateTitle: {
-        fontSize: 24,
-        fontWeight: '600',
-        color: '#1a1a1a',
-        marginBottom: 12,
+        fontSize: 32,
+        fontWeight: '700',
+        color: '#000',
+        marginBottom: 20,
         textAlign: 'center',
     },
     emptyStateDescription: {
-        fontSize: 16,
-        color: '#666',
+        fontSize: 22,
+        fontWeight: '600',
+        color: '#555',
         textAlign: 'center',
-        lineHeight: 24,
+        lineHeight: 34,
     },
 });

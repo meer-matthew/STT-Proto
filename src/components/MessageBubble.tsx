@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { AvatarIcon } from './icons/AvatarIcon';
+import { useTheme } from '../context/ThemeContext';
 
 type MessageBubbleProps = {
     name: string;
@@ -22,6 +23,9 @@ export function MessageBubble({
                                   onPlayAudio,
                                   isSpeaking = false
                               }: MessageBubbleProps) {
+    const theme = useTheme();
+    const styles = createStyles(theme);
+
     return (
         <View style={[styles.container, isCurrentUser && styles.senderContainer]}>
             <View style={styles.avatarContainer}>
@@ -61,18 +65,18 @@ export function MessageBubble({
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
     container: {
         flexDirection: 'row',
-        marginBottom: 16,
-        paddingHorizontal: 16,
-        gap: 8,
+        marginBottom: theme.spacing.lg,
+        paddingHorizontal: theme.spacing.lg,
+        gap: theme.spacing.sm,
     },
     senderContainer: {
         flexDirection: 'row-reverse',
     },
     avatarContainer: {
-        paddingTop: 24,
+        paddingTop: 8,
     },
     bubbleWrapper: {
         flex: 1,
@@ -84,42 +88,54 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        marginBottom: 4,
+        gap: theme.spacing.sm,
+        marginBottom: theme.spacing.xs,
     },
     name: {
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '600',
-        color: '#000',
+        color: theme.colors.text,
     },
     time: {
-        fontSize: 12,
-        color: '#666',
+        fontSize: 13,
+        fontWeight: '400',
+        color: '#999',
     },
     audioButton: {
-        padding: 4,
+        padding: theme.spacing.xs,
+        minWidth: 44,
+        minHeight: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     audioButtonActive: {
-        backgroundColor: '#ffe5e5',
-        borderRadius: 4,
+        backgroundColor: theme.colors.errorLight,
+        borderRadius: theme.borderRadius.sm,
     },
     bubble: {
-        backgroundColor: '#f5f5f5',
-        borderRadius: 16,
-        padding: 12,
-        maxWidth: '80%',
+        backgroundColor: theme.colors.white,
+        borderRadius: 20,
+        borderTopLeftRadius: 4,
+        padding: 16,
+        maxWidth: '75%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 2,
+        elevation: 2,
     },
     senderBubble: {
-        backgroundColor: '#fff',
-        borderWidth: 1,
-        borderColor: '#e0e0e0',
+        backgroundColor: theme.colors.primary,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 4,
     },
     message: {
-        fontSize: 15,
-        color: '#000',
-        lineHeight: 20,
+        fontSize: 16,
+        fontWeight: '400',
+        color: theme.colors.text,
+        lineHeight: 22,
     },
     senderMessage: {
-        textAlign: 'right',
+        color: theme.colors.white,
     },
 });

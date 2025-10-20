@@ -14,8 +14,9 @@ class Conversation(db.Model):
     # Relationships
     user = db.relationship('User', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade='all, delete-orphan', order_by='Message.created_at')
+    participants = db.relationship('ConversationParticipant', back_populates='conversation', cascade='all, delete-orphan')
 
-    def to_dict(self, include_messages=False):
+    def to_dict(self, include_messages=False, include_participants=False):
         result = {
             'id': self.id,
             'user_id': self.user_id,
@@ -30,7 +31,15 @@ class Conversation(db.Model):
         if include_messages:
             result['messages'] = [msg.to_dict() for msg in self.messages]
 
+        if include_participants:
+            result['participants'] = [p.to_dict() for p in self.participants]
+            result['participant_count'] = len(self.participants)
+
         return result
+
+    def is_participant(self, user_id):
+        """Check if a user is a participant in this conversation"""
+        return any(p.user_id == user_id for p in self.participants)
 
     def __repr__(self):
         return f'<Conversation id={self.id} user_id={self.user_id} config={self.configuration}>'
