@@ -7,6 +7,7 @@ from functools import wraps
 from app import db
 from app.models.conversation import Conversation, Message
 from app.models.conversation_participant import ConversationParticipant
+from app.models.notification import Notification
 from app.models.user import User
 from app.routes.auth import token_required
 
@@ -65,6 +66,109 @@ def get_user_conversations(current_user):
 
         return jsonify({
             'conversations': [conv.to_dict() for conv in all_conversations]
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/conversations/with-details', methods=['GET'])
+@token_required
+def get_conversations_with_details(current_user):
+    """
+    Get all conversations with participants and messages for the current user
+
+    This endpoint returns a complete view of conversations including:
+    - Conversation metadata
+    - All participants with their details
+    - All messages
+
+    Returns:
+    {
+        "conversations": [
+            {
+                "id": 1,
+                "user_id": 1,
+                "configuration": "1:1",
+                "is_active": true,
+                "created_at": "...",
+                "updated_at": "...",
+                "participants": [
+                    {
+                        "id": 1,
+                        "conversation_id": 1,
+                        "user_id": 2,
+                        "user": { "id": 2, "username": "john", "email": "..." },
+                        "added_by": 1,
+                        "joined_at": "..."
+                    }
+                ],
+                "messages": [
+                    {
+                        "id": 1,
+                        "conversation_id": 1,
+                        "sender": "john",
+                        "sender_type": "user",
+                        "message": "Hello",
+                        "has_audio": false,
+                        "created_at": "..."
+                    }
+                ]
+            }
+        ]
+    }
+    """
+    try:
+        # Get conversations owned by user
+        owned_conversations = Conversation.query.filter_by(
+            user_id=current_user.id,
+            is_active=True
+        ).all()
+
+        # Get conversations where user is a participant
+        participant_records = ConversationParticipant.query.filter_by(
+            user_id=current_user.id
+        ).all()
+        participant_conv_ids = [p.conversation_id for p in participant_records]
+
+        participating_conversations = Conversation.query.filter(
+            Conversation.id.in_(participant_conv_ids),
+            Conversation.is_active == True
+        ).all() if participant_conv_ids else []
+
+        # Combine and deduplicate
+        all_conversation_ids = {conv.id: conv for conv in owned_conversations + participating_conversations}
+        all_conversations = list(all_conversation_ids.values())
+
+        # Sort by updated_at
+        all_conversations.sort(key=lambda x: x.updated_at, reverse=True)
+
+        # Build response with participants and messages
+        conversations_data = []
+        for conversation in all_conversations:
+            # Get participants for this conversation
+            participants = ConversationParticipant.query.filter_by(
+                conversation_id=conversation.id
+            ).all()
+
+            # Get messages for this conversation
+            messages = Message.query.filter_by(
+                conversation_id=conversation.id
+            ).order_by(Message.created_at).all()
+
+            # Build conversation dict with participants and messages
+            conv_dict = conversation.to_dict()
+            conv_dict['participants'] = [
+                {
+                    **p.to_dict(),
+                    'user': p.user.to_dict() if p.user else None
+                } for p in participants
+            ]
+            conv_dict['messages'] = [msg.to_dict() for msg in messages]
+
+            conversations_data.append(conv_dict)
+
+        return jsonify({
+            'conversations': conversations_data
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -343,6 +447,17 @@ def add_participant(current_user, conversation_id):
         )
 
         db.session.add(participant)
+
+        # Create notification for the added user
+        notification = Notification(
+            user_id=user_id,
+            type='conversation_added',
+            title='Added to Conversation',
+            message=f'{current_user.username} added you to a conversation',
+            conversation_id=conversation_id
+        )
+
+        db.session.add(notification)
         db.session.commit()
 
         return jsonify(participant.to_dict()), 201

@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
 import {
-    useColorScheme,
     View,
     ScrollView,
     Alert,
@@ -10,46 +9,81 @@ import {
     SafeAreaView,
     KeyboardAvoidingView,
     Platform,
+    ActivityIndicator,
+    Animated,
+    Pressable,
+    Image,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { MessageBubble } from '../components/MessageBubble';
 import { KeyboardInput } from '../components/KeyboardInput';
-import { ConversationList } from '../components/ConversationList';
 import { SoundMeter } from '../components/SoundMeter';
 import { useConversation } from '../context/ConversationContext';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
+import { useTokenExpiration } from '../hooks/useTokenExpiration';
 import { SpeechIndicator } from '../components/SpeechIndicator';
 import { AddParticipantModal } from '../components/AddParticipantModal';
+import { ConversationDrawer } from '../components/ConversationDrawer';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
 import { AppLayout } from '../components/AppLayout';
 import { conversationService } from '../services/conversationService';
+import { authService } from '../services/authService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Conversation'>;
 
 export function ConversationScreen({ navigation, route }: Props) {
-    const isDarkMode = useColorScheme() === 'dark';
     const theme = useTheme();
     const styles = createStyles(theme);
-    const { username } = route.params;
+    const { username, conversationId: paramConversationId } = route.params;
     // const { configuration } = route.params; // Commented out - configuration no longer used
     const scrollViewRef = useRef<ScrollView>(null);
-    const [showConversationList, setShowConversationList] = useState(true);
     const [participants, setParticipants] = useState<any[]>([]);
     const [conversationOwner, setConversationOwner] = useState<any>(null);
     const [showAddParticipantModal, setShowAddParticipantModal] = useState(false);
+    const [showConversationDrawer, setShowConversationDrawer] = useState(false);
+    const [userGender, setUserGender] = useState<'male' | 'female' | 'other' | undefined>(undefined);
 
-    const { createConversation, addMessage, getMessages, setCurrentConversation, getCurrentConversation, fetchUserConversations, isLoading } = useConversation();
+    // Token expiration handler
+    const { handleAuthError } = useTokenExpiration();
+
+    // Fetch current user's gender for voice selection
+    useEffect(() => {
+        const fetchUserGender = async () => {
+            try {
+                const user = await authService.getUser();
+                if (user && user.gender) {
+                    setUserGender(user.gender);
+                }
+            } catch (error) {
+                console.error('Failed to fetch user gender:', error);
+            }
+        };
+
+        fetchUserGender();
+    }, []);
+
+    const { createConversation, addMessage, addReceivedMessage, getMessages, setCurrentConversation, getCurrentConversation, loadConversation } = useConversation();
     const [conversationId, setConversationId] = useState<string | null>(null);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const messages = conversationId ? getMessages(conversationId) : [];
 
-    // Fetch user conversations on mount
+    // Ref to store stream cleanup function
+    const streamCleanupRef = useRef<(() => void) | null>(null);
+
+    // Auto-create or load conversation on mount
     useEffect(() => {
-        fetchUserConversations();
-    }, []);
+        if (paramConversationId) {
+            // Load existing conversation
+            handleLoadConversation(paramConversationId);
+        } else {
+            // Create new conversation
+            handleCreateConversation();
+        }
+    }, [paramConversationId]);
 
     // Fetch participants when conversation changes
     useEffect(() => {
@@ -73,21 +107,67 @@ export function ConversationScreen({ navigation, route }: Props) {
                         user_type: 'user' // Default, ideally should be fetched from backend
                     });
                 }
-            } catch (error) {
+            } catch (error: any) {
+                // Check if token has expired
+                if (handleAuthError(error)) {
+                    return; // Token expired, handleAuthError will redirect
+                }
                 console.error('Failed to fetch participants:', error);
                 setParticipants([]);
             }
         };
 
         fetchParticipants();
-    }, [conversationId]);
+    }, [conversationId, handleAuthError]);
 
-    // Don't create conversation automatically on mount - only when + icon is clicked
+    // Enable message polling for real-time reception from other users
+    useEffect(() => {
+        if (!conversationId) {
+            // Clean up any existing stream
+            if (streamCleanupRef.current) {
+                streamCleanupRef.current();
+                streamCleanupRef.current = null;
+            }
+            return;
+        }
 
-    const handleSelectConversation = (id: string) => {
-        setCurrentConversation(id);
-        setConversationId(id);
-    };
+        // Start polling for new messages from other users
+        const startMessagePolling = async () => {
+            console.log('[ConversationScreen] Starting message polling for conversation:', conversationId);
+
+            try {
+                const cleanup = await conversationService.streamMessages(
+                    Number(conversationId),
+                    (message) => {
+                        // Check if this is a message from another user (not sent by current user locally)
+                        if (message.sender !== username) {
+                            console.log('[ConversationScreen] Received message from:', message.sender);
+                            addReceivedMessage(conversationId, message);
+                        } else {
+                            // Only log our own messages from polling if they weren't already added locally
+                            console.log('[ConversationScreen] Skipping own message from polling');
+                        }
+                    },
+                    (error) => {
+                        console.error('[ConversationScreen] Message polling error:', error);
+                    }
+                );
+                streamCleanupRef.current = cleanup;
+            } catch (error) {
+                console.error('[ConversationScreen] Failed to start message polling:', error);
+            }
+        };
+
+        startMessagePolling();
+
+        return () => {
+            // Cleanup on unmount or conversation change
+            if (streamCleanupRef.current) {
+                streamCleanupRef.current();
+                streamCleanupRef.current = null;
+            }
+        };
+    }, [conversationId, username, addReceivedMessage]);
 
     const handleCreateConversation = async () => {
         try {
@@ -95,13 +175,30 @@ export function ConversationScreen({ navigation, route }: Props) {
             setConversationId(id);
             setCurrentConversation(id);
         } catch (error: any) {
+            // Check if token has expired
+            if (handleAuthError(error)) {
+                return; // Token expired, handleAuthError will redirect
+            }
             Alert.alert('Error', 'Failed to create conversation. Please try again.');
             console.error('Create conversation error:', error);
         }
     };
 
-    const toggleConversationList = () => {
-        setShowConversationList(!showConversationList);
+    const handleLoadConversation = async (convId: number) => {
+        try {
+            const id = String(convId);
+            // Load conversation from backend
+            await loadConversation(id);
+            setConversationId(id);
+            setCurrentConversation(id);
+        } catch (error: any) {
+            // Check if token has expired
+            if (handleAuthError(error)) {
+                return; // Token expired, handleAuthError will redirect
+            }
+            Alert.alert('Error', 'Failed to load conversation. Please try again.');
+            console.error('Load conversation error:', error);
+        }
     };
 
     const handleRefreshParticipants = async () => {
@@ -110,13 +207,25 @@ export function ConversationScreen({ navigation, route }: Props) {
         try {
             const participantsList = await conversationService.getParticipants(Number(conversationId));
             setParticipants(participantsList);
-        } catch (error) {
+        } catch (error: any) {
+            // Check if token has expired
+            if (handleAuthError(error)) {
+                return; // Token expired, handleAuthError will redirect
+            }
             console.error('Failed to refresh participants:', error);
         }
     };
 
     const handleAddParticipantClick = () => {
         setShowAddParticipantModal(true);
+    };
+
+    const handleSelectConversationFromDrawer = async (convId: string) => {
+        await handleLoadConversation(Number(convId));
+    };
+
+    const handleCreateConversationFromDrawer = async () => {
+        await handleCreateConversation();
     };
 
     const {
@@ -132,10 +241,12 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     const { speak, stop, isSpeaking, currentlySpeakingId } = useTextToSpeech();
 
+    console.log(transcript)
+
     // Auto-scroll to bottom when new messages arrive
     useEffect(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, [messages, transcript]);
+    }, [messages, transcript, isTranscribing]);
 
     // Handle errors
     useEffect(() => {
@@ -148,20 +259,28 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     const handleMicPress = async () => {
         if (isRecording) {
-            await stopRecording();
-            // Add the message when recording stops
-            if (transcript.trim() && conversationId) {
-                const messageText = transcript.trim();
+            // Show transcribing state
+            setIsTranscribing(true);
+
+            // Stop recording and get the transcribed text directly
+            const transcribedText = await stopRecording();
+
+            // Automatically add the message when recording stops
+            if (transcribedText.trim() && conversationId) {
+                const messageText = transcribedText.trim();
                 const messageId = addMessage(conversationId, username, 'user', messageText, true);
 
                 // Automatically play TTS for the sent message
                 if (messageId) {
                     // Small delay to ensure message is rendered
                     setTimeout(() => {
-                        speak(messageText, messageId);
+                        speak(messageText, messageId, userGender);
                     }, 100);
                 }
             }
+
+            // Hide transcribing state
+            setIsTranscribing(false);
         } else {
             await startRecording();
         }
@@ -170,7 +289,7 @@ export function ConversationScreen({ navigation, route }: Props) {
     const handleMessageSent = (messageText: string, messageId: string) => {
         // Automatically play TTS when a text message is sent
         setTimeout(() => {
-            speak(messageText, messageId);
+            speak(messageText, messageId, userGender);
         }, 100);
     };
 
@@ -182,7 +301,7 @@ export function ConversationScreen({ navigation, route }: Props) {
         if (currentlySpeakingId === messageId && isSpeaking) {
             stop();
         } else {
-            speak(messageText, messageId);
+            speak(messageText, messageId, userGender);
         }
     };
 
@@ -199,78 +318,120 @@ export function ConversationScreen({ navigation, route }: Props) {
     // const caregiverCount = parseInt(configuration.split(':')[0]) || 1;
 
     return (
-        <AppLayout showHeader={true} showHeaderBorder={true} navigation={navigation}>
+        <AppLayout
+            showHeader={true}
+            showHeaderBorder={true}
+            navigation={navigation}
+            showMenuButton={true}
+            onMenuPress={() => setShowConversationDrawer(true)}>
             <SafeAreaView style={styles.flex}>
-                <View style={styles.splitContainer}>
-                {/* Conversation List - 1/3 width */}
-                {showConversationList && (
-                    <View style={styles.conversationListPanel}>
-                        <ConversationList
-                            onSelectConversation={handleSelectConversation}
-                            selectedConversationId={conversationId}
-                            onCreateConversation={handleCreateConversation}
-                        />
-                    </View>
-                )}
-
-                {/* Main Conversation Area - 2/3 width */}
                 <KeyboardAvoidingView
                     style={styles.conversationPanel}
                     behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                     keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
                     {/* Top Navigation Bar */}
                     <View style={styles.topNavBar}>
-                        <View style={styles.leftNavGroup}>
-                            <TouchableOpacity
-                                style={styles.toggleButton}
-                                onPress={toggleConversationList}
-                                activeOpacity={0.7}>
-                                <Icon name={showConversationList ? 'times' : 'bars'} size={20} color="#666" />
-                            </TouchableOpacity>
-                        </View>ple
-
-                        {/* Center - Participants List */}
+                        {/* Participants List - Left Side */}
                         {conversationId && (conversationOwner || participants.length > 0) && (
-                            <View style={styles.centerNavGroup}>
-                                {conversationOwner && (
-                                    <View style={styles.participantRow}>
-                                        <Text
-                                            style={styles.participantName}
-                                            numberOfLines={1}
-                                            ellipsizeMode="tail">
-                                            {conversationOwner.username}
-                                        </Text>
-                                        {/*<View style={styles.rolePill}>*/}
-                                        {/*    <Text style={styles.rolePillText}>*/}
-                                        {/*        {conversationOwner.user_type === 'caretaker' ? 'CARETAKER' : 'USER'}*/}
-                                        {/*    </Text>*/}
-                                        {/*</View>*/}
-                                    </View>
-                                )}
-                                {participants.map((participant, index) => (
-                                    <View key={index} style={styles.participantRow}>
-                                        <Text
-                                            style={styles.participantName}
-                                            numberOfLines={1}
-                                            ellipsizeMode="tail">
-                                            {participant.username}
-                                        </Text>
-                                        {/*<View style={styles.rolePill}>*/}
-                                        {/*    <Text style={styles.rolePillText}>*/}
-                                        {/*        {participant.user_type === 'caretaker' ? 'CARETAKER' : 'USER'}*/}
-                                        {/*    </Text>*/}
-                                        {/*</View>*/}
-                                    </View>
-                                ))}
+                            <>
+                                {/* Caretakers and Users */}
+                                {(() => {
+                                    const allParticipants = [
+                                        ...(conversationOwner ? [conversationOwner] : []),
+                                        ...participants
+                                    ];
+                                    const caretakers = allParticipants.filter(p => p.user_type === 'caretaker');
+                                    const users = allParticipants.filter(p => p.user_type !== 'caretaker');
+
+                                    const getInitials = (username: string) => {
+                                        return username
+                                            .split(' ')
+                                            .map(word => word[0])
+                                            .join('')
+                                            .toUpperCase()
+                                            .slice(0, 2);
+                                    };
+
+                                    return (
+                                        <View style={styles.participantsContainer}>
+                                            {/* Caretakers Column */}
+                                            {caretakers.length > 0 && (
+                                                <View style={styles.roleColumn}>
+                                                    <View style={styles.roleTitleContainer}>
+                                                        <Icon name="user-md" size={12} color={theme.colors.primary} />
+                                                        <Text style={styles.roleTitle}>Caretakers</Text>
+                                                    </View>
+                                                    <View style={styles.avatarsRow}>
+                                                        {caretakers.map((participant, index) => (
+                                                            <Pressable
+                                                                key={`caretaker-${index}`}
+                                                                onPress={() => {
+                                                                    Alert.alert(
+                                                                        'Caretaker',
+                                                                        `${participant.username} is caring for this conversation`
+                                                                    );
+                                                                }}>
+                                                                <View style={[styles.avatarMedium, styles.avatarCaretaker]}>
+                                                                    {participant.user?.img_url ? (
+                                                                        <Image
+                                                                            source={{ uri: participant.user.img_url }}
+                                                                            style={styles.avatarImage}
+                                                                        />
+                                                                    ) : (
+                                                                        <Icon name="user-md" size={12} color={theme.colors.white} />
+                                                                    )}
+                                                                </View>
+                                                            </Pressable>
+                                                        ))}
+                                                    </View>
+                                                </View>
+                                            )}
+
+                                            {/* Users Column */}
+                                            {users.length > 0 && (
+                                                <View style={styles.roleColumn}>
+                                                    <View style={styles.roleTitleContainer}>
+                                                        <Icon name="user" size={12} color={theme.colors.secondary} />
+                                                        <Text style={styles.roleTitle}>Users</Text>
+                                                    </View>
+                                                    <View style={styles.avatarsRow}>
+                                                        {users.map((participant, index) => (
+                                                            <Pressable
+                                                                key={`user-${index}`}
+                                                                onPress={() => {
+                                                                    Alert.alert(
+                                                                        'Participant',
+                                                                        `${participant.username} is participating in this conversation`
+                                                                    );
+                                                                }}>
+                                                                <View style={[styles.avatarMedium, styles.avatarUser]}>
+                                                                    {participant.user?.img_url ? (
+                                                                        <Image
+                                                                            source={{ uri: participant.user.img_url }}
+                                                                            style={styles.avatarImage}
+                                                                        />
+                                                                    ) : (
+                                                                        <Icon name="user" size={12} color={theme.colors.white} />
+                                                                    )}
+                                                                </View>
+                                                            </Pressable>
+                                                        ))}
+                                                    </View>
+                                                </View>
+                                            )}
+                                        </View>
+                                    );
+                                })()}
+
+                                {/* Add Participant Button - Right Side */}
                                 <TouchableOpacity
                                     style={styles.addParticipantButton}
                                     onPress={handleAddParticipantClick}
                                     activeOpacity={0.7}>
                                     <Icon name="plus" size={16} color={theme.colors.white} />
                                 </TouchableOpacity>
-                            </View>
+                            </>
                         )}
-
                     </View>
 
                     {/* COMMENTED OUT - Configuration Header */}
@@ -290,10 +451,10 @@ export function ConversationScreen({ navigation, route }: Props) {
                                         <Icon name="comment-o" size={64} color="#d0d0d0" />
                                     </View>
                                     <Text style={styles.emptyStateTitle}>
-                                        No conversation selected
+                                        Starting conversation...
                                     </Text>
                                     <Text style={styles.emptyStateDescription}>
-                                        Create a new conversation by clicking the + icon or select an existing one
+                                        Please wait while we set up your conversation
                                     </Text>
                                 </View>
                             ) : messages.length === 0 && !isRecording ? (
@@ -315,28 +476,56 @@ export function ConversationScreen({ navigation, route }: Props) {
                                             key={message.id}
                                             name={message.sender}
                                             time={formatTime(message.timestamp)}
-                                            message={message.message}
+                                            message={message.accumulatedText || message.message}
                                             isCurrentUser={message.sender === username}
                                             hasAudio={message.hasAudio}
                                             onPlayAudio={() => handlePlayAudio(message.id, message.message)}
                                             isSpeaking={currentlySpeakingId === message.id && isSpeaking}
+                                            isStreaming={message.isStreaming}
                                         />
                                     ))}
                                 </>
                             )}
 
-                            {isRecording && transcript && (
+                            {isRecording && (
                                 <SpeechIndicator
-                                    text={transcript}
+                                    text={transcript || "Listening..."}
                                     onCancel={handleCancelRecording}
                                 />
                             )}
 
-                            {isRecording && !transcript && (
-                                <SpeechIndicator
-                                    text="Listening..."
-                                    onCancel={handleCancelRecording}
-                                />
+                            {(isRecording || isTranscribing) && transcript && (
+                                <View style={styles.loadingMessageContainer}>
+                                    <View style={styles.loadingAvatarContainer}>
+                                        <View style={styles.loadingAvatar} />
+                                    </View>
+                                    <View style={styles.loadingBubbleWrapper}>
+                                        <View style={styles.loadingBubble}>
+                                            <Text style={styles.loadingMessageText}>
+                                                {transcript}
+                                            </Text>
+                                            {isTranscribing && (
+                                                <Text style={styles.processingIndicator}>processing...</Text>
+                                            )}
+                                        </View>
+                                    </View>
+                                </View>
+                            )}
+
+                            {(isRecording || isTranscribing) && !transcript && (
+                                <View style={styles.loadingMessageContainer}>
+                                    <View style={styles.loadingAvatarContainer}>
+                                        <View style={styles.loadingAvatar} />
+                                    </View>
+                                    <View style={styles.loadingBubbleWrapper}>
+                                        <View style={styles.loadingBubble}>
+                                            <ActivityIndicator size="small" color={theme.colors.white} />
+                                            <Text style={styles.loadingMessageText}>
+                                                {isRecording ? 'Listening...' : 'Transcribing...'}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
                             )}
                         </View>
                     </ScrollView>
@@ -355,7 +544,6 @@ export function ConversationScreen({ navigation, route }: Props) {
                         </>
                     )}
                 </KeyboardAvoidingView>
-                </View>
 
                 {/* Add Participant Modal */}
                 {conversationId && (
@@ -367,148 +555,110 @@ export function ConversationScreen({ navigation, route }: Props) {
                         onParticipantAdded={handleRefreshParticipants}
                     />
                 )}
+
+                {/* Conversation Drawer */}
+                <ConversationDrawer
+                    visible={showConversationDrawer}
+                    onClose={() => setShowConversationDrawer(false)}
+                    onSelectConversation={handleSelectConversationFromDrawer}
+                    selectedConversationId={conversationId}
+                    onCreateConversation={handleCreateConversationFromDrawer}
+                />
             </SafeAreaView>
         </AppLayout>
     );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f5f5f5',
-    },
     flex: {
         flex: 1,
         backgroundColor: '#f5f5f5',
     },
-    splitContainer: {
-        flex: 1,
-        flexDirection: 'row',
-    },
-    conversationListPanel: {
-        width: '25%',
-        minWidth: 250,
-        maxWidth: 350,
-    },
     conversationPanel: {
         flex: 1,
         backgroundColor: '#f5f5f5',
-        paddingBottom: 20,
+        paddingBottom: theme.spacing.xl,
     },
     topNavBar: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
-        paddingHorizontal: theme.spacing.md,
-        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.lg,
+        paddingVertical: theme.spacing.md,
         backgroundColor: theme.colors.white,
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.borderLight,
     },
-    leftNavGroup: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.spacing.sm,
-    },
-    centerNavGroup: {
+    participantsContainer: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: theme.spacing.md,
+        gap: theme.spacing.md,
+        alignItems: 'flex-start',
     },
-    rightNavGroup: {
+    roleColumn: {
+        flex: 1,
+        gap: theme.spacing.xs,
+    },
+    roleTitleContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        position: 'relative',
+        gap: theme.spacing.xs,
     },
-    participantRow: {
+    roleTitle: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: '700',
+        color: theme.colors.textSecondary,
+    },
+    avatarsRow: {
         flexDirection: 'row',
+        gap: theme.spacing.xs,
+        flexWrap: 'wrap',
         alignItems: 'center',
-        marginRight: theme.spacing.md,
-        maxWidth: 180,
-        flexShrink: 1,
     },
-    participantName: {
-        fontSize: theme.fontSize.md,
-        fontWeight: '600',
-        color: '#1a1a1a',
-        flexShrink: 1,
-        maxWidth: '100%',
-    },
-    rolePill: {
-        backgroundColor: '#e8f4f8',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: theme.colors.primary,
-        marginLeft: 6,
-    },
-    rolePillText: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: theme.colors.primary,
-        letterSpacing: 0.5,
-    },
-    toggleButton: {
-        padding: theme.spacing.sm,
+    avatarMedium: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: theme.colors.primary,
         justifyContent: 'center',
         alignItems: 'center',
-        minWidth: 44,
-        minHeight: 44,
+        overflow: 'hidden',
     },
-    avatarButton: {
-        padding: theme.spacing.xs,
+    avatarImage: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
     },
-    avatar: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+    avatarSmall: {
+        width: 18,
+        height: 18,
+        borderRadius: 9,
         backgroundColor: theme.colors.primary,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    dropdown: {
-        position: 'absolute',
-        top: 50,
-        right: 0,
-        backgroundColor: theme.colors.white,
-        borderRadius: theme.borderRadius.md,
-        borderWidth: 1,
-        borderColor: theme.colors.borderLight,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-        elevation: 5,
-        minWidth: 180,
-        zIndex: 1000,
+    avatarCaretaker: {
+        backgroundColor: theme.colors.primary,
     },
-    dropdownHeader: {
-        padding: theme.spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.borderLight,
+    avatarUser: {
+        backgroundColor: theme.colors.secondary,
     },
-    dropdownUsername: {
-        fontSize: theme.fontSize.md,
+    activeBadge: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#10b981',
+        marginLeft: 2,
+    },
+    participantNameText: {
+        fontSize: theme.fontSize.xs,
         fontWeight: '600',
         color: theme.colors.text,
     },
-    dropdownItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.spacing.sm,
-        padding: theme.spacing.md,
-    },
-    dropdownItemText: {
-        fontSize: theme.fontSize.md,
-        color: '#666',
-    },
-    conversationHeader: {
-        borderBottomWidth: theme.borderWidth.thick,
-        borderBottomColor: theme.colors.border,
-        backgroundColor: theme.colors.white,
+    avatarInitials: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: theme.colors.white,
     },
     scrollContainer: {
         flexGrow: 1,
@@ -545,12 +695,60 @@ const createStyles = (theme: any) => StyleSheet.create({
         maxWidth: 320,
     },
     addParticipantButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: theme.colors.primaryLight,
+        justifyContent: 'center',
+        alignItems: 'center',
+        alignSelf: 'flex-start',
+    },
+    loadingMessageContainer: {
+        flexDirection: 'row-reverse',
+        marginBottom: theme.spacing.lg,
+        paddingHorizontal: theme.spacing.lg,
+        gap: theme.spacing.sm,
+    },
+    loadingAvatarContainer: {
+        paddingTop: 8,
+    },
+    loadingAvatar: {
         width: 32,
         height: 32,
         borderRadius: 16,
         backgroundColor: theme.colors.primaryLight,
-        justifyContent: 'center',
+    },
+    loadingBubbleWrapper: {
+        flex: 1,
+        alignItems: 'flex-end',
+    },
+    loadingBubble: {
+        backgroundColor: theme.colors.primary,
+        borderRadius: 20,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 4,
+        padding: 16,
+        maxWidth: '75%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 2,
+        elevation: 2,
+        flexDirection: 'row',
         alignItems: 'center',
-        marginLeft: theme.spacing.sm,
+        gap: theme.spacing.sm,
+    },
+    loadingMessageText: {
+        fontSize: 16,
+        fontWeight: '400',
+        color: theme.colors.white,
+        lineHeight: 22,
+    },
+    processingIndicator: {
+        fontSize: 12,
+        fontWeight: '300',
+        color: theme.colors.white,
+        opacity: 0.7,
+        marginTop: theme.spacing.xs,
     },
 });

@@ -55,27 +55,16 @@ function getLocalIpAddress() {
 }
 
 function updateApiConfig(ipAddress) {
-    const configPath = path.join(__dirname, '..', 'src', 'config', 'api.config.ts');
+    // Write to JSON config file for runtime use
+    const jsonConfigPath = path.join(__dirname, '..', 'src', 'config', 'ip-config.json');
 
     try {
-        let content = fs.readFileSync(configPath, 'utf8');
-
-        // Replace the HOST_IP constant with the new IP
-        const updatedContent = content.replace(
-            /const HOST_IP = '[^']+';/,
-            `const HOST_IP = '${ipAddress}';`
-        );
-
-        if (content !== updatedContent) {
-            fs.writeFileSync(configPath, updatedContent, 'utf8');
-            console.log(`✅ Updated HOST_IP to ${ipAddress} in api.config.ts`);
-            return true;
-        } else {
-            console.log(`ℹ️  HOST_IP is already set to ${ipAddress}`);
-            return false;
-        }
+        const config = { HOST_IP: ipAddress };
+        fs.writeFileSync(jsonConfigPath, JSON.stringify(config, null, 2), 'utf8');
+        console.log(`✅ Updated HOST_IP to ${ipAddress} in ip-config.json`);
+        return true;
     } catch (error) {
-        console.error('❌ Error updating api.config.ts:', error.message);
+        console.error('❌ Error updating ip-config.json:', error.message);
         return false;
     }
 }

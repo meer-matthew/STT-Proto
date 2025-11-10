@@ -10,6 +10,7 @@ export interface User {
     username: string;
     email?: string;
     user_type: 'user' | 'caretaker';
+    gender?: 'male' | 'female' | 'other';
     created_at: string;
     updated_at: string;
     is_active: boolean;

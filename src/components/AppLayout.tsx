@@ -9,15 +9,17 @@ type AppLayoutProps = {
     showHeaderBorder?: boolean;
     navigation?: any;
     showAvatar?: boolean;
+    showMenuButton?: boolean;
+    onMenuPress?: () => void;
 };
 
-export function AppLayout({ children, showHeader = true, showHeaderBorder = false, navigation, showAvatar = true }: AppLayoutProps) {
+export function AppLayout({ children, showHeader = true, showHeaderBorder = false, navigation, showAvatar = true, showMenuButton = false, onMenuPress }: AppLayoutProps) {
     const theme = useTheme();
 
     return (
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={theme.colors.white} />
-            {showHeader && <AppHeader showBorder={showHeaderBorder} navigation={navigation} showAvatar={showAvatar} />}
+            {showHeader && <AppHeader showBorder={showHeaderBorder} navigation={navigation} showAvatar={showAvatar} showMenuButton={showMenuButton} onMenuPress={onMenuPress} />}
             {children}
         </View>
     );

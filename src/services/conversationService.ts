@@ -25,6 +25,14 @@ export interface ApiMessage {
     created_at: string;
 }
 
+export interface StreamEvent {
+    type: 'start' | 'chunk' | 'complete';
+    message_id?: number;
+    text?: string;
+    accumulated_text?: string;
+    message?: ApiMessage;
+}
+
 export interface ApiParticipant {
     id: number;
     conversation_id: number;
@@ -33,6 +41,24 @@ export interface ApiParticipant {
     user_type: 'user' | 'caretaker';
     added_at: string;
     added_by?: number;
+}
+
+export interface ApiUser {
+    id: number;
+    username: string;
+    email: string;
+    gender?: string;
+    img_url?: string;
+    is_active: boolean;
+}
+
+export interface ApiParticipantWithUser extends ApiParticipant {
+    user: ApiUser | null;
+}
+
+export interface ApiConversationWithDetails extends ApiConversation {
+    participants: ApiParticipantWithUser[];
+    messages: ApiMessage[];
 }
 
 class ConversationService {
@@ -57,12 +83,54 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to fetch conversations');
             }
 
             return data.conversations;
         } catch (error) {
             console.error('Get conversations error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all conversations with participants and messages in one call
+     * This avoids needing to make separate API calls for participants and messages
+     */
+    async getUserConversationsWithDetails(): Promise<ApiConversationWithDetails[]> {
+        try {
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
+
+            const response = await fetch(`${API_URL}/with-details`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
+                throw new Error(data.error || 'Failed to fetch conversations with details');
+            }
+
+            return data.conversations;
+        } catch (error) {
+            console.error('Get conversations with details error:', error);
             throw error;
         }
     }
@@ -89,6 +157,11 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to create conversation');
             }
 
@@ -120,6 +193,11 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to fetch conversation');
             }
 
@@ -161,6 +239,11 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to send message');
             }
 
@@ -192,6 +275,11 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to fetch messages');
             }
 
@@ -223,6 +311,11 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to fetch participants');
             }
 
@@ -255,6 +348,11 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to add participant');
             }
 
@@ -286,11 +384,206 @@ class ConversationService {
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle token expiration
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
                 throw new Error(data.error || 'Failed to remove participant');
             }
         } catch (error) {
             console.error('Remove participant error:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Send a message and stream the response in real-time using Server-Sent Events
+     * This sends a message to all participants in a conversation immediately
+     * Other participants receive it via the polling mechanism or SSE connection
+     */
+    async sendMessageWithStream(
+        conversationId: number,
+        message: string,
+        senderType: 'user' | 'caregiver' = 'user',
+        hasAudio: boolean = false,
+        onChunk: (event: StreamEvent) => void,
+        onError?: (error: Error) => void
+    ): Promise<ApiMessage | null> {
+        try {
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
+
+            console.log('[Message Stream] Starting SSE stream for message:', message.substring(0, 50));
+
+            const response = await fetch(`${API_URL}/${conversationId}/messages/stream`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message,
+                    sender_type: senderType,
+                    has_audio: hasAudio,
+                }),
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                if (response.status === 401) {
+                    await authService.clearAuth();
+                    throw new Error('Authentication expired');
+                }
+                throw new Error(data.error || 'Failed to send message with stream');
+            }
+
+            // Read the response body as text stream
+            const reader = response.body?.getReader();
+            if (!reader) {
+                throw new Error('Response body is not readable');
+            }
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let finalMessage: ApiMessage | null = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+
+                // Process all complete lines
+                for (let i = 0; i < lines.length - 1; i++) {
+                    const line = lines[i].trim();
+
+                    if (line === '' || line === ':') continue;
+                    if (line === '[DONE]') break;
+
+                    // Remove "data: " prefix if present
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.substring(6);
+                        try {
+                            const event = JSON.parse(dataStr) as StreamEvent;
+                            console.log('[Message Stream] Event received:', event.type);
+                            onChunk(event);
+
+                            // Store final message
+                            if (event.type === 'complete' && event.message) {
+                                finalMessage = event.message;
+                            }
+                        } catch (e) {
+                            console.warn('[Message Stream] Failed to parse event:', line, e);
+                        }
+                    }
+                }
+
+                // Keep the last incomplete line in buffer
+                buffer = lines[lines.length - 1];
+            }
+
+            console.log('[Message Stream] Stream completed');
+            return finalMessage;
+        } catch (error) {
+            console.error('Send message with stream error:', error);
+            if (onError) {
+                onError(error as Error);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Stream messages from a conversation using polling (React Native compatible)
+     * Polls for new messages every 1 second for faster real-time updates
+     * Returns a cleanup function to close the connection
+     */
+    async streamMessages(
+        conversationId: number,
+        onMessage: (message: ApiMessage) => void,
+        onError?: (error: Error) => void
+    ): Promise<() => void> {
+        try {
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
+
+            console.log('[Messages Stream] Starting polling for conversation:', conversationId);
+
+            let lastMessageId = 0;
+            let pollInterval: NodeJS.Timeout | null = null;
+            let isClosed = false;
+
+            // Fetch initial messages to know the last message ID
+            try {
+                const initialMessages = await this.getMessages(conversationId);
+                if (initialMessages.length > 0) {
+                    lastMessageId = initialMessages[initialMessages.length - 1].id;
+                }
+                console.log('[Messages Stream] Initial last message ID:', lastMessageId);
+            } catch (e) {
+                console.warn('[Messages Stream] Failed to fetch initial messages:', e);
+            }
+
+            // Poll for new messages every 1 second for better real-time feel
+            const poll = async () => {
+                if (isClosed) return;
+
+                try {
+                    const messages = await this.getMessages(conversationId);
+
+                    // Find new messages (those with ID greater than lastMessageId)
+                    const newMessages = messages.filter(msg => msg.id > lastMessageId);
+
+                    if (newMessages.length > 0) {
+                        console.log('[Messages Stream] Found', newMessages.length, 'new messages');
+                        // Update last message ID
+                        lastMessageId = newMessages[newMessages.length - 1].id;
+
+                        // Call onMessage callback for each new message
+                        newMessages.forEach(msg => {
+                            console.log('[Messages Stream] Message received:', msg);
+                            onMessage(msg);
+                        });
+                    }
+                } catch (error) {
+                    console.error('[Messages Stream] Polling error:', error);
+                    if (onError) {
+                        onError(error as Error);
+                    }
+                }
+
+                // Schedule next poll
+                if (!isClosed) {
+                    pollInterval = setTimeout(poll, 1000); // Poll every 1 second for faster updates
+                }
+            };
+
+            // Start polling immediately
+            pollInterval = setTimeout(poll, 0);
+
+            console.log('[Messages Stream] Polling started');
+
+            // Return cleanup function
+            return () => {
+                console.log('[Messages Stream] Closing polling');
+                isClosed = true;
+                if (pollInterval) {
+                    clearTimeout(pollInterval);
+                }
+            };
+        } catch (error) {
+            console.error('Stream messages error:', error);
+            if (onError) {
+                onError(error as Error);
+            }
+            // Return no-op cleanup function
+            return () => {};
         }
     }
 }

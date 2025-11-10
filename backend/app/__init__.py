@@ -32,10 +32,14 @@ def create_app():
     from app import models
 
     # Register blueprints
-    from app.routes import conversation, health, auth
+    from app.routes import conversation, health, auth, stt, tts, notifications, stt_streaming
     app.register_blueprint(conversation.bp)
     app.register_blueprint(health.bp)
     app.register_blueprint(auth.bp)
+    app.register_blueprint(stt.bp)
+    app.register_blueprint(stt_streaming.bp)
+    app.register_blueprint(tts.bp)
+    app.register_blueprint(notifications.bp)
 
     # Create database tables
     with app.app_context():

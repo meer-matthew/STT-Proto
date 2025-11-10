@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useConversation, Conversation } from '../context/ConversationContext';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
-import { conversationService } from '../services/conversationService';
 
 type ConversationListProps = {
     onSelectConversation: (conversationId: string) => void;
@@ -12,35 +11,27 @@ type ConversationListProps = {
 };
 
 export function ConversationList({ onSelectConversation, selectedConversationId, onCreateConversation }: ConversationListProps) {
-    const { conversations } = useConversation();
+    const { conversations, fetchUserConversations, isLoading } = useConversation();
     const theme = useTheme();
     const conversationList = Array.from(conversations.values());
     const styles = createStyles(theme);
 
-    const [conversationParticipants, setConversationParticipants] = useState<Map<string, any[]>>(new Map());
+    const [loadingError, setLoadingError] = useState<string | null>(null);
 
-    // Fetch participants for all conversations
+    // Fetch conversations on mount
     useEffect(() => {
-        const fetchParticipants = async () => {
-            const participantsMap = new Map<string, any[]>();
-
-            for (const conversation of conversationList) {
-                try {
-                    const participants = await conversationService.getParticipants(Number(conversation.id));
-                    participantsMap.set(conversation.id, participants);
-                } catch (error) {
-                    console.error(`Failed to fetch participants for conversation ${conversation.id}:`, error);
-                    participantsMap.set(conversation.id, []);
-                }
+        const loadConversations = async () => {
+            try {
+                setLoadingError(null);
+                await fetchUserConversations();
+            } catch (error: any) {
+                console.error('Failed to load conversations:', error);
+                setLoadingError(error.message || 'Failed to load conversations');
             }
-
-            setConversationParticipants(participantsMap);
         };
 
-        if (conversationList.length > 0) {
-            fetchParticipants();
-        }
-    }, [conversationList.length]);
+        loadConversations();
+    }, []);
 
     const formatDate = (date: Date) => {
         const now = new Date();
@@ -79,7 +70,24 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
 
             {/* Conversations List */}
         <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
-            {conversationList.length === 0 ? (
+            {isLoading ? (
+                <View style={styles.emptyState}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={[styles.emptyStateText, { marginTop: theme.spacing.lg }]}>
+                        Loading conversations...
+                    </Text>
+                </View>
+            ) : loadingError ? (
+                <View style={styles.emptyState}>
+                    <Icon name="exclamation-triangle" size={48} color={theme.colors.error} />
+                    <Text style={[styles.emptyStateText, { color: theme.colors.error }]}>
+                        Failed to load conversations
+                    </Text>
+                    <Text style={styles.emptyStateSubtext}>
+                        {loadingError}
+                    </Text>
+                </View>
+            ) : conversationList.length === 0 ? (
                 <View style={styles.emptyState}>
                     <Icon name="comments-o" size={48} color="#ccc" />
                     <Text style={styles.emptyStateText}>No conversations yet</Text>
@@ -90,16 +98,6 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
             ) : (
                 conversationList.map((conversation) => {
                     const isSelected = conversation.id === selectedConversationId;
-                    const participants = conversationParticipants.get(conversation.id) || [];
-
-                    // Get owner info from conversation
-                    const ownerInfo = {
-                        username: conversation.username,
-                        user_type: 'user' // Default, we'll need to fetch this properly
-                    };
-
-                    // Combine owner and participants
-                    const allParticipants = [ownerInfo, ...participants];
 
                     return (
                         <TouchableOpacity
@@ -115,20 +113,9 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
                             </View>
                             <View style={styles.conversationContent}>
                                 <View style={styles.conversationHeader}>
-                                    <View style={styles.participantsList}>
-                                        {allParticipants.map((participant, index) => (
-                                            <View key={index} style={styles.participantRow}>
-                                                <Text style={styles.participantName}>
-                                                    {participant.username}
-                                                </Text>
-                                                <View style={styles.rolePill}>
-                                                    <Text style={styles.rolePillText}>
-                                                        {participant.user_type === 'caretaker' ? 'Caretaker' : 'User'}
-                                                    </Text>
-                                                </View>
-                                            </View>
-                                        ))}
-                                    </View>
+                                    <Text style={styles.conversationUsername}>
+                                        {conversation.username}
+                                    </Text>
                                     <Text style={styles.conversationTime}>
                                         {formatDate(conversation.createdAt)}
                                     </Text>
@@ -248,27 +235,29 @@ const createStyles = (theme: any) => StyleSheet.create({
     participantRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 4,
         flexWrap: 'wrap',
     },
     participantName: {
-        fontSize: theme.fontSize.sm,
+        fontSize: theme.fontSize.xs,
         fontWeight: '600',
         color: '#1a1a1a',
     },
-    rolePill: {
-        backgroundColor: '#e8f4f8',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
+    avatarCaretaker: {
+        width: 16,
+        height: 16,
         borderRadius: 8,
-        borderWidth: 1,
-        borderColor: theme.colors.primary,
+        backgroundColor: theme.colors.primary,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    rolePillText: {
-        fontSize: 9,
-        fontWeight: '600',
-        color: theme.colors.primary,
-        textTransform: 'uppercase',
+    avatarUser: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: theme.colors.secondary,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     conversationTime: {
         fontSize: theme.fontSize.xs,

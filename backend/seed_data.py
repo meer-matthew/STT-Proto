@@ -27,14 +27,14 @@ def seed_database():
         db.session.commit()
 
         print("Seeding sample users...")
-        # Create sample users with passwords
-        user1 = User(username='john_doe', email='john@example.com', user_type='user')
+        # Create sample users with passwords and gender
+        user1 = User(username='john_doe', email='john@example.com', user_type='user', gender='male')
         user1.set_password('password123')
 
-        user2 = User(username='jane_smith', email='jane@example.com', user_type='user')
+        user2 = User(username='jane_smith', email='jane@example.com', user_type='user', gender='female')
         user2.set_password('password123')
 
-        caregiver1 = User(username='alice_care', email='alice@example.com', user_type='caretaker')
+        caregiver1 = User(username='alice_care', email='alice@example.com', user_type='caretaker', gender='female')
         caregiver1.set_password('password123')
 
         db.session.add_all([user1, user2, caregiver1])

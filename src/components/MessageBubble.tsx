@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { AvatarIcon } from './icons/AvatarIcon';
 import { useTheme } from '../context/ThemeContext';
@@ -12,6 +12,7 @@ type MessageBubbleProps = {
     hasAudio?: boolean;
     onPlayAudio?: () => void;
     isSpeaking?: boolean;
+    isStreaming?: boolean;
 };
 
 export function MessageBubble({
@@ -21,17 +22,104 @@ export function MessageBubble({
                                   isCurrentUser = false,
                                   hasAudio = false,
                                   onPlayAudio,
-                                  isSpeaking = false
+                                  isSpeaking = false,
+                                  isStreaming = false
                               }: MessageBubbleProps) {
     const theme = useTheme();
     const styles = createStyles(theme);
 
+    // Entrance animation
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const slideAnim = useRef(new Animated.Value(30)).current;
+
+    // Press animation
+    const scaleAnim = useRef(new Animated.Value(1)).current;
+
+    // Streaming indicator animation
+    const streamingAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        // Entrance animation
+        Animated.parallel([
+            Animated.timing(fadeAnim, {
+                toValue: 1,
+                duration: 300,
+                useNativeDriver: true,
+            }),
+            Animated.spring(slideAnim, {
+                toValue: 0,
+                tension: 50,
+                friction: 7,
+                useNativeDriver: true,
+            }),
+        ]).start();
+    }, []);
+
+    useEffect(() => {
+        // Streaming indicator animation - pulsing effect
+        if (isStreaming) {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(streamingAnim, {
+                        toValue: 1,
+                        duration: 600,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(streamingAnim, {
+                        toValue: 0,
+                        duration: 600,
+                        useNativeDriver: true,
+                    }),
+                ])
+            ).start();
+        }
+    }, [isStreaming]);
+
+    const handlePressIn = () => {
+        Animated.spring(scaleAnim, {
+            toValue: 0.97,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const handlePressOut = () => {
+        Animated.spring(scaleAnim, {
+            toValue: 1,
+            tension: 100,
+            friction: 3,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const handleAudioPress = () => {
+        if (onPlayAudio) {
+            onPlayAudio();
+        }
+    };
+
     return (
-        <View style={[styles.container, isCurrentUser && styles.senderContainer]}>
+        <Animated.View
+            style={[
+                styles.container,
+                isCurrentUser && styles.senderContainer,
+                {
+                    opacity: fadeAnim,
+                    transform: [
+                        { translateY: slideAnim },
+                        { scale: scaleAnim }
+                    ]
+                }
+            ]}
+        >
             <View style={styles.avatarContainer}>
                 <AvatarIcon variant="small" />
             </View>
-            <View style={[styles.bubbleWrapper, isCurrentUser && styles.senderBubbleWrapper]}>
+            <TouchableOpacity
+                activeOpacity={1}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                style={[styles.bubbleWrapper, isCurrentUser && styles.senderBubbleWrapper]}
+            >
                 <View style={styles.header}>
                     {!isCurrentUser && (
                         <>
@@ -47,7 +135,7 @@ export function MessageBubble({
                     )}
                     <TouchableOpacity
                         style={[styles.audioButton, isSpeaking && styles.audioButtonActive]}
-                        onPress={onPlayAudio}>
+                        onPress={handleAudioPress}>
                         <Icon
                             name={isSpeaking ? "stop" : "volume-up"}
                             size={16}
@@ -55,13 +143,23 @@ export function MessageBubble({
                         />
                     </TouchableOpacity>
                 </View>
-                <View style={[styles.bubble, isCurrentUser && styles.senderBubble]}>
-                    <Text style={[styles.message, isCurrentUser && styles.senderMessage]}>
+                <View style={[
+                    styles.bubble,
+                    isCurrentUser && styles.senderBubble,
+                    isSpeaking && styles.bubblePlaying,
+                    isStreaming && [styles.bubbleStreaming, isCurrentUser && styles.bubbleStreamingSender]
+                ]}>
+                    <Text style={[
+                        styles.message,
+                        isCurrentUser && styles.senderMessage,
+                        isSpeaking && styles.messagePlaying
+                    ]}>
                         {message}
+                        {isStreaming && <Text style={styles.streamingDots}>...</Text>}
                     </Text>
                 </View>
-            </View>
-        </View>
+            </TouchableOpacity>
+        </Animated.View>
     );
 }
 
@@ -118,11 +216,6 @@ const createStyles = (theme: any) => StyleSheet.create({
         borderTopLeftRadius: 4,
         padding: 16,
         maxWidth: '75%',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 2,
-        elevation: 2,
     },
     senderBubble: {
         backgroundColor: theme.colors.primary,
@@ -130,12 +223,32 @@ const createStyles = (theme: any) => StyleSheet.create({
         borderTopRightRadius: 4,
     },
     message: {
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: '400',
         color: theme.colors.text,
-        lineHeight: 22,
+        lineHeight: 26,
     },
     senderMessage: {
         color: theme.colors.white,
+    },
+    bubblePlaying: {
+        borderWidth: 2,
+        borderColor: theme.colors.primary,
+    },
+    messagePlaying: {
+        fontWeight: '700',
+    },
+    bubbleStreaming: {
+        borderWidth: 1.5,
+        borderColor: theme.colors.primary,
+    },
+    bubbleStreamingSender: {
+        backgroundColor: theme.colors.primary,
+    },
+    streamingDots: {
+        fontSize: 18,
+        fontWeight: '400',
+        color: theme.colors.primary,
+        marginLeft: 4,
     },
 });

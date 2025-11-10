@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { conversationService, ApiConversation } from '../services/conversationService';
+import { conversationService, ApiConversation, ApiConversationWithDetails, StreamEvent } from '../services/conversationService';
 
 export type Message = {
     id: string;
@@ -8,6 +8,8 @@ export type Message = {
     message: string;
     timestamp: Date;
     hasAudio?: boolean;
+    isStreaming?: boolean; // Indicates if message is currently streaming
+    accumulatedText?: string; // Text accumulated during streaming
 };
 
 export type Conversation = {
@@ -23,9 +25,12 @@ type ConversationContextType = {
     currentConversationId: string | null;
     isLoading: boolean;
     createConversation: (username: string, configuration: string) => Promise<string>;
+    loadConversation: (id: string) => Promise<void>;
     setCurrentConversation: (id: string) => Promise<void>;
     getCurrentConversation: () => Conversation | null;
     addMessage: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean) => string | null;
+    addMessageWithStream: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean) => Promise<string | null>;
+    addReceivedMessage: (conversationId: string, apiMessage: any) => void;
     getMessages: (conversationId: string) => Message[];
     clearConversation: (conversationId: string) => void;
     fetchUserConversations: () => Promise<void>;
@@ -41,17 +46,28 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     const fetchUserConversations = async () => {
         setIsLoading(true);
         try {
-            const apiConversations = await conversationService.getUserConversations();
+            // Fetch conversations with all details (participants and messages) in one call
+            const apiConversations = await conversationService.getUserConversationsWithDetails();
 
             // Convert API conversations to local format
             const conversationsMap = new Map<string, Conversation>();
             apiConversations.forEach((apiConv) => {
+                // Convert API messages to local format
+                const messages: Message[] = (apiConv.messages || []).map(apiMsg => ({
+                    id: String(apiMsg.id),
+                    sender: apiMsg.sender,
+                    senderType: apiMsg.sender_type,
+                    message: apiMsg.message,
+                    timestamp: new Date(apiMsg.created_at),
+                    hasAudio: apiMsg.has_audio,
+                }));
+
                 const conversation: Conversation = {
                     id: String(apiConv.id),
                     username: apiConv.username,
                     configuration: apiConv.configuration,
                     createdAt: new Date(apiConv.created_at),
-                    messages: [], // Messages will be loaded separately when conversation is selected
+                    messages, // Now we have all messages from the API response
                 };
                 conversationsMap.set(String(apiConv.id), conversation);
             });
@@ -81,6 +97,42 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             return String(apiConversation.id);
         } catch (error) {
             console.error('Failed to create conversation:', error);
+            throw error;
+        }
+    };
+
+    const loadConversation = async (id: string): Promise<void> => {
+        try {
+            // Fetch conversation details from backend
+            const apiConversation = await conversationService.getConversation(Number(id));
+
+            // Fetch messages for this conversation
+            const apiMessages = await conversationService.getMessages(Number(id));
+
+            // Convert API messages to local format
+            const messages: Message[] = apiMessages.map(apiMsg => ({
+                id: String(apiMsg.id),
+                sender: apiMsg.sender,
+                senderType: apiMsg.sender_type,
+                message: apiMsg.message,
+                timestamp: new Date(apiMsg.created_at),
+                hasAudio: apiMsg.has_audio,
+            }));
+
+            // Create conversation object
+            const conversation: Conversation = {
+                id: String(apiConversation.id),
+                username: apiConversation.username,
+                configuration: apiConversation.configuration,
+                createdAt: new Date(apiConversation.created_at),
+                messages,
+            };
+
+            // Add to conversations map and set as current
+            setConversations(prev => new Map(prev).set(id, conversation));
+            setCurrentConversationId(id);
+        } catch (error) {
+            console.error('Failed to load conversation:', error);
             throw error;
         }
     };
@@ -200,9 +252,172 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         return tempMessageId;
     };
 
+    const addMessageWithStream = async (
+        conversationId: string,
+        sender: string,
+        senderType: 'user' | 'caregiver',
+        message: string,
+        hasAudio: boolean = false
+    ): Promise<string | null> => {
+        const conversation = conversations.get(conversationId);
+        if (!conversation) return null;
+
+        // Create temporary message ID for immediate UI update
+        const tempMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+        const newMessage: Message = {
+            id: tempMessageId,
+            sender,
+            senderType,
+            message: '', // Will be populated by stream
+            timestamp: new Date(),
+            hasAudio,
+            isStreaming: true,
+            accumulatedText: '',
+        };
+
+        // Optimistically update UI with empty streaming message
+        const updatedConversation = {
+            ...conversation,
+            messages: [...conversation.messages, newMessage],
+        };
+
+        setConversations(prev => new Map(prev).set(conversationId, updatedConversation));
+
+        // Send message and stream response
+        try {
+            const finalMessage = await conversationService.sendMessageWithStream(
+                Number(conversationId),
+                message,
+                senderType,
+                hasAudio,
+                (event: StreamEvent) => {
+                    // Handle streaming events
+                    if (event.type === 'start') {
+                        console.log('[Context] Stream started for message:', event.message_id);
+                    } else if (event.type === 'chunk') {
+                        // Update with accumulated text
+                        setConversations(prev => {
+                            const conv = prev.get(conversationId);
+                            if (!conv) return prev;
+
+                            const updatedMessages = conv.messages.map(msg => {
+                                if (msg.id === tempMessageId) {
+                                    return {
+                                        ...msg,
+                                        accumulatedText: event.accumulated_text || '',
+                                        isStreaming: true,
+                                    };
+                                }
+                                return msg;
+                            });
+
+                            return new Map(prev).set(conversationId, {
+                                ...conv,
+                                messages: updatedMessages,
+                            });
+                        });
+                    } else if (event.type === 'complete' && event.message) {
+                        // Replace with final message from backend
+                        const backendMessage: Message = {
+                            id: String(event.message.id),
+                            sender: event.message.sender,
+                            senderType: event.message.sender_type,
+                            message: event.message.message,
+                            timestamp: new Date(event.message.created_at),
+                            hasAudio: event.message.has_audio,
+                            isStreaming: false,
+                            accumulatedText: event.message.message,
+                        };
+
+                        setConversations(prev => {
+                            const conv = prev.get(conversationId);
+                            if (!conv) return prev;
+
+                            const updatedMessages = conv.messages.map(msg =>
+                                msg.id === tempMessageId ? backendMessage : msg
+                            );
+
+                            return new Map(prev).set(conversationId, {
+                                ...conv,
+                                messages: updatedMessages,
+                            });
+                        });
+
+                        console.log('[Context] Stream completed');
+                    }
+                },
+                (error: Error) => {
+                    console.error('[Context] Stream error:', error);
+                    // Mark message as failed or keep with temp ID
+                    setConversations(prev => {
+                        const conv = prev.get(conversationId);
+                        if (!conv) return prev;
+
+                        const updatedMessages = conv.messages.map(msg => {
+                            if (msg.id === tempMessageId) {
+                                return {
+                                    ...msg,
+                                    isStreaming: false,
+                                };
+                            }
+                            return msg;
+                        });
+
+                        return new Map(prev).set(conversationId, {
+                            ...conv,
+                            messages: updatedMessages,
+                        });
+                    });
+                }
+            );
+
+            return finalMessage ? String(finalMessage.id) : tempMessageId;
+        } catch (error) {
+            console.error('Failed to add message with stream:', error);
+            return tempMessageId;
+        }
+    };
+
     const getMessages = (conversationId: string): Message[] => {
         const conversation = conversations.get(conversationId);
         return conversation?.messages || [];
+    };
+
+    const addReceivedMessage = (conversationId: string, apiMessage: any): void => {
+        const conversation = conversations.get(conversationId);
+        if (!conversation) return;
+
+        // Check if message already exists (to prevent duplicates)
+        const messageExists = conversation.messages.some(msg => String(msg.id) === String(apiMessage.id));
+        if (messageExists) {
+            console.log('[Context] Message already exists:', apiMessage.id);
+            return;
+        }
+
+        // Convert API message to local format
+        const newMessage: Message = {
+            id: String(apiMessage.id),
+            sender: apiMessage.sender,
+            senderType: apiMessage.sender_type,
+            message: apiMessage.message,
+            timestamp: new Date(apiMessage.created_at),
+            hasAudio: apiMessage.has_audio,
+            isStreaming: false,
+        };
+
+        // Add message to conversation
+        setConversations(prev => {
+            const conv = prev.get(conversationId);
+            if (!conv) return prev;
+
+            return new Map(prev).set(conversationId, {
+                ...conv,
+                messages: [...conv.messages, newMessage],
+            });
+        });
+
+        console.log('[Context] Received message from:', apiMessage.sender);
     };
 
     const clearConversation = (conversationId: string) => {
@@ -224,9 +439,12 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                 currentConversationId,
                 isLoading,
                 createConversation,
+                loadConversation,
                 setCurrentConversation,
                 getCurrentConversation,
                 addMessage,
+                addMessageWithStream,
+                addReceivedMessage,
                 getMessages,
                 clearConversation,
                 fetchUserConversations,

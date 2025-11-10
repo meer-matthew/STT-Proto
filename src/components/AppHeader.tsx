@@ -1,18 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
 import { authService } from '../services/authService';
+import { NotificationBell } from './NotificationBell';
 
 type AppHeaderProps = {
     showBorder?: boolean;
     navigation?: any;
     showAvatar?: boolean;
+    showMenuButton?: boolean;
+    onMenuPress?: () => void;
 };
 
-export function AppHeader({ showBorder = true, navigation, showAvatar = true }: AppHeaderProps) {
+export function AppHeader({ showBorder = true, navigation, showAvatar = true, showMenuButton = false, onMenuPress }: AppHeaderProps) {
     const theme = useTheme();
-    const styles = createStyles(theme, showBorder);
+    const insets = useSafeAreaInsets();
+    const styles = createStyles(theme, showBorder, insets.top);
     const [showDropdown, setShowDropdown] = useState(false);
     const [username, setUsername] = useState<string | null>(null);
 
@@ -51,7 +56,24 @@ export function AppHeader({ showBorder = true, navigation, showAvatar = true }: 
 
     return (
         <View style={styles.container}>
+            {/* Menu Button - Left Side */}
+            {showMenuButton && (
+                <TouchableOpacity
+                    style={styles.menuButton}
+                    onPress={onMenuPress}
+                    activeOpacity={0.7}>
+                    <Icon name="bars" size={20} color={theme.colors.text} />
+                </TouchableOpacity>
+            )}
+
             <Text style={styles.appName}>Wakaku STT</Text>
+
+            {/* Show notification bell if user is logged in */}
+            {username && showAvatar && (
+                <View style={styles.notificationContainer}>
+                    <NotificationBell navigation={navigation} />
+                </View>
+            )}
 
             {/* Only show avatar if user is logged in and showAvatar prop is true */}
             {username && showAvatar && (
@@ -85,11 +107,12 @@ export function AppHeader({ showBorder = true, navigation, showAvatar = true }: 
     );
 }
 
-const createStyles = (theme: any, showBorder: boolean) => StyleSheet.create({
+const createStyles = (theme: any, showBorder: boolean, topInset: number) => StyleSheet.create({
     container: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        marginTop: topInset,
         paddingHorizontal: theme.spacing.lg,
         paddingVertical: theme.spacing.md,
         backgroundColor: theme.colors.white,
@@ -97,16 +120,37 @@ const createStyles = (theme: any, showBorder: boolean) => StyleSheet.create({
         borderBottomColor: theme.colors.borderLight,
         position: 'relative',
     },
+    menuButton: {
+        position: 'absolute',
+        left: theme.spacing.lg,
+        top: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: theme.spacing.xs,
+        zIndex: 1002,
+    },
     appName: {
         fontSize: theme.fontSize.lg,
         fontWeight: '700',
         color: theme.colors.primary,
     },
+    notificationContainer: {
+        position: 'absolute',
+        right: theme.spacing.lg + 50, // Position to left of avatar
+        top: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1001,
+    },
     avatarContainer: {
         position: 'absolute',
         right: theme.spacing.lg,
-        top: '50%',
-        transform: [{ translateY: -18 }], // Half of avatar height to center
+        top: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
         zIndex: 1001,
     },
     avatarButton: {

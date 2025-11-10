@@ -8,8 +8,6 @@ type SpeakingIndicatorProps = {
 };
 
 export function SpeechIndicator({ text, onCancel }: SpeakingIndicatorProps) {
-    if (!text) return null;
-
     return (
         <View style={styles.container}>
             <View style={styles.bubble}>
@@ -31,6 +29,7 @@ export function SpeechIndicator({ text, onCancel }: SpeakingIndicatorProps) {
         </View>
     );
 }
+
 
 const styles = StyleSheet.create({
     container: {

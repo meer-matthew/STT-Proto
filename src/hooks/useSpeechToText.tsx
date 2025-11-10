@@ -1,94 +1,848 @@
-import { useEffect, useState, useCallback } from 'react';
-import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice/voice';
+/**
+ * Speech-to-Text Hook
+ *
+ * Supports two modes:
+ * 1. On-Device STT (default) - FREE, uses device's native speech recognition
+ * 2. Whisper API - Paid ($0.006/min), uses OpenAI Whisper for cloud transcription
+ *
+ * To switch modes, change USE_WHISPER_API constant below.
+ */
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Platform, PermissionsAndroid } from 'react-native';
+import Voice from '@react-native-voice/voice';
+import AudioRecord from 'react-native-audio-record';
+import RNFS from 'react-native-fs';
+import { API_CONFIG } from '../config/api.config';
+import { authService } from '../services/authService';
+
+// Polyfill for btoa in React Native
+const btoa = (str: string): string => {
+    // For React Native, we can use a simple encoding approach
+    // If Buffer is available, use it; otherwise use a fallback
+    try {
+        return Buffer.from(str, 'binary').toString('base64');
+    } catch {
+        // Fallback: Use built-in btoa if available, or encode manually
+        if (typeof global !== 'undefined' && global.btoa) {
+            return global.btoa(str);
+        }
+        // Last resort: encode as utf8
+        return Buffer.from(str, 'utf8').toString('base64');
+    }
+};
+
+/**
+ * Wrap raw PCM audio in WAV header format
+ * This allows Deepgram to recognize and transcribe the audio
+ */
+const wrapPCMInWAV = (pcmData: string): string => {
+    const SAMPLE_RATE = 16000;
+    const CHANNELS = 1;
+    const BITS_PER_SAMPLE = 16;
+
+    // Convert binary string to Uint8Array for processing
+    let pcmBytes: Uint8Array;
+    if (typeof Buffer !== 'undefined') {
+        pcmBytes = Buffer.from(pcmData, 'binary');
+    } else {
+        // Fallback for environments without Buffer
+        pcmBytes = new Uint8Array(pcmData.length);
+        for (let i = 0; i < pcmData.length; i++) {
+            pcmBytes[i] = pcmData.charCodeAt(i) & 0xFF;
+        }
+    }
+
+    const byteRate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE / 8;
+    const blockAlign = CHANNELS * BITS_PER_SAMPLE / 8;
+    const dataSize = pcmBytes.length;
+    const fileSize = 36 + dataSize;
+
+    // Create WAV header
+    const header = new Uint8Array(44);
+    const view = new DataView(header.buffer);
+
+    // "RIFF" chunk descriptor
+    header[0] = 0x52; // R
+    header[1] = 0x49; // I
+    header[2] = 0x46; // F
+    header[3] = 0x46; // F
+
+    view.setUint32(4, fileSize, true); // File size - 8
+
+    // "WAVE" format
+    header[8] = 0x57; // W
+    header[9] = 0x41; // A
+    header[10] = 0x86; // V
+    header[11] = 0x69; // E
+
+    // "fmt " subchunk
+    header[12] = 0x66; // f
+    header[13] = 0x6d; // m
+    header[14] = 0x74; // t
+    header[15] = 0x20; // (space)
+
+    view.setUint32(16, 16, true); // Subchunk1 size (16 for PCM)
+    view.setUint16(20, 1, true); // Audio format (1 for PCM)
+    view.setUint16(22, CHANNELS, true); // Number of channels
+    view.setUint32(24, SAMPLE_RATE, true); // Sample rate
+    view.setUint32(28, byteRate, true); // Byte rate
+    view.setUint16(32, blockAlign, true); // Block align
+    view.setUint16(34, BITS_PER_SAMPLE, true); // Bits per sample
+
+    // "data" subchunk
+    header[36] = 0x64; // d
+    header[37] = 0x61; // a
+    header[38] = 0x74; // t
+    header[39] = 0x61; // a
+
+    view.setUint32(40, dataSize, true); // Subchunk2 size
+
+    // Combine header and PCM data
+    const wavData = new Uint8Array(header.length + pcmBytes.length);
+    wavData.set(header);
+    wavData.set(pcmBytes, header.length);
+
+    // Convert back to binary string
+    let wavString = '';
+    for (let i = 0; i < wavData.length; i++) {
+        wavString += String.fromCharCode(wavData[i]);
+    }
+
+    return wavString;
+};
+
+// ============================================================
+// CONFIGURATION: Set to true to use Whisper API instead of on-device STT
+// - false (default) = FREE on-device recognition (Google/Apple STT) + LIVE transcription
+// - true = Whisper API ($0.006/min, better quality and consistency) but NO live transcription
+// ============================================================
+// Use Deepgram Streaming for live transcription and audio levels
+const USE_DEEPGRAM_STREAMING = true;
+// Fallback to Whisper for complete audio transcription (if streaming fails)
+const USE_WHISPER_API = true;
 
 export function useSpeechToText() {
     const [isRecording, setIsRecording] = useState(false);
     const [transcript, setTranscript] = useState('');
     const [error, setError] = useState<string | null>(null);
-    const [isAvailable, setIsAvailable] = useState(false);
-    const [audioLevel, setAudioLevel] = useState(0); // Not available for device-based recognition
+    const [isAvailable, setIsAvailable] = useState(true);
+    const [audioLevel, setAudioLevel] = useState(0);
+    const [hasPermissions, setHasPermissions] = useState(false);
+    const [isAudioRecordInitialized, setIsAudioRecordInitialized] = useState(false);
 
-    const onSpeechStart = useCallback(() => {
-        console.log('Speech recognition started');
-        setError(null);
-    }, []);
+    // Audio level tracking with proper listener management
+    const audioLevelListenerRef = useRef<any>(null);
+    const lastUpdateTimeRef = useRef<number>(0);
+    const THROTTLE_INTERVAL = 50; // Update audio level max every 50ms (~20Hz)
 
-    const onSpeechEnd = useCallback(() => {
-        console.log('Speech recognition ended');
-        setIsRecording(false);
-    }, []);
+    // Adaptive audio level normalization
+    const audioLevelHistoryRef = useRef<number[]>([]); // Store recent peak levels
+    const MAX_HISTORY = 20; // Keep last 20 measurements
+    const silenceThresholdRef = useRef<number>(100); // Minimum level for silence detection
 
-    const onSpeechResults = useCallback((event: SpeechResultsEvent) => {
-        if (event.value && event.value.length > 0) {
-            const recognizedText = event.value[0];
-            console.log('Speech recognized:', recognizedText);
-            setTranscript(recognizedText);
-        }
-    }, []);
+    // Track accumulated transcript from streaming chunks
+    const accumulatedTranscriptRef = useRef<string>('');
 
-    const onSpeechError = useCallback((event: SpeechErrorEvent) => {
-        console.error('Speech recognition error:', event.error);
-        setError(event.error?.message || 'Speech recognition failed');
-        setIsRecording(false);
-    }, []);
+    // Buffer audio chunks before sending to avoid tiny incomplete fragments
+    const audioBufferRef = useRef<string>('');
+    const bufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const BUFFER_INTERVAL = 500; // Send buffered audio every 500ms
 
-    useEffect(() => {
-        // Check if speech recognition is available
-        Voice.isAvailable().then((available) => {
-            setIsAvailable(available === 1);
-        });
 
-        // Set up event listeners
-        Voice.onSpeechStart = onSpeechStart;
-        Voice.onSpeechEnd = onSpeechEnd;
-        Voice.onSpeechResults = onSpeechResults;
-        Voice.onSpeechError = onSpeechError;
-
-        return () => {
-            // Clean up
-            Voice.destroy().then(Voice.removeAllListeners);
-        };
-    }, [onSpeechStart, onSpeechEnd, onSpeechResults, onSpeechError]);
-
-    const startRecording = async () => {
-        if (!isAvailable) {
-            setError('Speech recognition is not available on this device');
+    /**
+     * Send audio chunk to Deepgram streaming endpoint for live transcription
+     */
+    const sendAudioChunkForTranscription = useCallback(async (audioData: string) => {
+        if (!USE_DEEPGRAM_STREAMING) {
+            console.log('[Streaming] Skipped - streaming disabled');
             return;
         }
 
         try {
-            setTranscript('');
-            setError(null);
-            await Voice.start('en-US');
-            setIsRecording(true);
+            const token = await authService.getToken();
+            if (!token) {
+                console.warn('[Streaming] ❌ No auth token available');
+                return;
+            }
+
+            // Wrap PCM data in WAV format so Deepgram can recognize it
+            console.log('[Streaming] 📦 Wrapping PCM in WAV format, PCM size:', audioData.length);
+            let wavAudio;
+            try {
+                wavAudio = wrapPCMInWAV(audioData);
+                console.log('[Streaming] ✓ WAV wrapped - size:', wavAudio.length, 'bytes');
+            } catch (e) {
+                console.warn('[Streaming] ❌ Failed to wrap WAV:', e);
+                return;
+            }
+
+            // Convert to base64 safely
+            let base64Audio;
+            try {
+                base64Audio = btoa(wavAudio);
+                console.log('[Streaming] ✓ Audio encoded - size:', base64Audio.length, 'chars');
+            } catch (e) {
+                console.warn('[Streaming] ❌ Failed to encode audio:', e);
+                return;
+            }
+
+            const requestBody = {
+                audio_base64: base64Audio,
+                language: 'en',
+                is_final: false,
+                timestamp: Date.now()
+            };
+
+            console.log('[Streaming] 📤 POST to /api/stt/stream-chunk');
+            const startTime = Date.now();
+
+            const response = await fetch(`${API_CONFIG.BASE_URL}/api/stt/stream-chunk`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
+
+            console.log("RESPON", response)
+
+            const duration = Date.now() - startTime;
+            console.log('[Streaming] 📥 Response status:', response.status, `(${duration}ms)`);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.warn('[Streaming] ❌ HTTP Error:', response.status);
+                console.warn('[Streaming] Error response:', errorText.substring(0, 200));
+                return;
+            }
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseErr) {
+                console.warn('[Streaming] ❌ Failed to parse JSON response:', parseErr);
+                return;
+            }
+
+            console.log('[Streaming] ✓ Response parsed');
+            console.log('[Streaming] ✓ Transcript:', result.transcript || '[empty]');
+            console.log('[Streaming] ✓ Confidence:', result.confidence);
+
+            // Accumulate transcript from streaming chunks
+            console.log("hello", result.transcript)
+            if (result.transcript && result.transcript.trim()) {
+                const newText = result.transcript.trim();
+
+                // Only add if it's not already in the accumulated transcript (prevent duplicates)
+                if (!accumulatedTranscriptRef.current.endsWith(newText)) {
+                    // Add space if we already have text
+                    if (accumulatedTranscriptRef.current) {
+                        accumulatedTranscriptRef.current += ' ' + newText;
+                    } else {
+                        accumulatedTranscriptRef.current = newText;
+                    }
+
+                    console.log('[Streaming] 📝 NEW TEXT:', newText);
+                    console.log('[Streaming] 📝 ACCUMULATED:', accumulatedTranscriptRef.current);
+                    setTranscript(accumulatedTranscriptRef.current);
+                } else {
+                    console.log('[Streaming] ℹ️ Text already accumulated, skipping');
+                }
+            } else {
+                console.log('[Streaming] ⚠️ Empty/null transcript in response:', result);
+            }
+        } catch (err) {
+            console.error('[Streaming] ❌ Fetch Error:', err instanceof Error ? err.message : err);
+        }
+    }, []);
+
+    /**
+     * Handle audio data with throttling to prevent excessive state updates
+     */
+    const handleAudioData = useCallback((data: any) => {
+        if (!data) {
+            console.warn('[Audio] No data received');
+            return;
+        }
+
+        const now = Date.now();
+
+        // Throttle updates to 20Hz to reduce CPU usage and UI flicker
+        if (now - lastUpdateTimeRef.current < THROTTLE_INTERVAL) {
+            return;
+        }
+
+        lastUpdateTimeRef.current = now;
+
+        try {
+            // Calculate average audio level from data samples
+            let sum = 0;
+            let sampleCount = 0;
+
+            // Process each byte as a sample (simpler approach)
+            for (let i = 0; i < data.length; i++) {
+                const byte = data.charCodeAt(i);
+                // Convert byte (0-255) to signed (-128 to 127) range
+                const signed = byte < 128 ? byte : byte - 256;
+                sum += Math.abs(signed);
+                sampleCount++;
+            }
+
+            // Calculate average absolute amplitude
+            const avgLevel = sampleCount > 0 ? sum / sampleCount : 0;
+
+            // Store in history for adaptive normalization
+            audioLevelHistoryRef.current.push(avgLevel);
+            if (audioLevelHistoryRef.current.length > MAX_HISTORY) {
+                audioLevelHistoryRef.current.shift();
+            }
+
+            // Calculate peak from history (helps normalize across different microphones)
+            const peakInHistory = Math.max(...audioLevelHistoryRef.current, 1);
+
+            // Adaptive normalization: use recent peak as reference
+            // This makes the meter work well regardless of mic sensitivity
+            let normalizedLevel = peakInHistory > 0 ? (avgLevel / peakInHistory) * 10 : 0;
+
+            // Apply soft logarithmic scaling for natural feel
+            if (normalizedLevel > 0) {
+                normalizedLevel = Math.log10(normalizedLevel + 1) * 5;
+            }
+
+            // Clamp to 0-10 range
+            normalizedLevel = Math.min(10, Math.max(0, normalizedLevel));
+
+            // Only update if above noise floor (helps prevent constant buzzing)
+            if (avgLevel > silenceThresholdRef.current) {
+                console.log('[Audio] Avg:', avgLevel.toFixed(1), 'Peak History:', peakInHistory.toFixed(1), 'Level:', normalizedLevel.toFixed(2));
+                setAudioLevel(normalizedLevel);
+            } else {
+                setAudioLevel(0); // Silence
+            }
+
+            // Buffer audio chunk for periodic transcription
+            if (USE_DEEPGRAM_STREAMING) {
+                // Ensure data is in correct format for Deepgram
+                let audioChunk = data;
+                if (typeof data !== 'string') {
+                    // If it's a Buffer or Uint8Array, convert to binary string
+                    if (Buffer.isBuffer(data)) {
+                        audioChunk = data.toString('binary');
+                    } else if (data instanceof Uint8Array) {
+                        audioChunk = String.fromCharCode(...Array.from(data));
+                    }
+                }
+
+                // Add chunk to buffer
+                audioBufferRef.current += audioChunk;
+                console.log('[Audio] Buffered chunk - total buffer size:', audioBufferRef.current.length);
+
+                // Clear existing timeout and set a new one to flush periodically
+                if (bufferTimeoutRef.current) {
+                    clearTimeout(bufferTimeoutRef.current);
+                }
+                bufferTimeoutRef.current = setTimeout(() => {
+                    if (audioBufferRef.current && audioBufferRef.current.length > 0) {
+                        console.log('[Audio] Buffer timeout triggered, flushing buffer size:', audioBufferRef.current.length);
+                        const bufferedAudio = audioBufferRef.current;
+                        audioBufferRef.current = ''; // Reset buffer
+                        sendAudioChunkForTranscription(bufferedAudio);
+                    }
+                }, BUFFER_INTERVAL);
+            }
+        } catch (err) {
+            console.error('[Audio] Error calculating level:', err);
+        }
+    }, [sendAudioChunkForTranscription]);
+
+    /**
+     * Setup audio level listener (called when starting recording)
+     */
+    const setupAudioLevelListener = useCallback(() => {
+        console.log('[Audio] Setting up audio level listener...');
+        console.log('[Audio] AudioRecord type:', typeof AudioRecord);
+        console.log('[Audio] AudioRecord.on type:', typeof AudioRecord.on);
+
+        // Remove any existing listener first to prevent duplicates
+        if (audioLevelListenerRef.current) {
+            try {
+                console.log('[Audio] Removing old listener');
+                AudioRecord.off?.('data', audioLevelListenerRef.current);
+            } catch (err) {
+                console.warn('[Audio] Error removing old listener:', err);
+            }
+        }
+
+        // Add new listener
+        audioLevelListenerRef.current = handleAudioData;
+        console.log('[Audio] Calling AudioRecord.on("data", handleAudioData)...');
+        AudioRecord.on('data', handleAudioData);
+        console.log('[Audio] Audio level listener attached successfully');
+    }, [handleAudioData]);
+
+    /**
+     * Cleanup audio level listener (called when stopping recording)
+     */
+    const cleanupAudioLevelListener = useCallback(() => {
+        if (audioLevelListenerRef.current) {
+            try {
+                AudioRecord.off?.('data', audioLevelListenerRef.current);
+                audioLevelListenerRef.current = null;
+                console.log('[Audio] Audio level listener removed');
+            } catch (err) {
+                console.warn('[Audio] Error removing listener:', err);
+            }
+        }
+    }, []);
+
+    // Check if permissions are already granted
+    const checkPermissions = async (): Promise<boolean> => {
+        if (Platform.OS === 'android') {
+            try {
+                const recordAudioGranted = await PermissionsAndroid.check(
+                    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+                );
+
+                console.log('Permissions status:', { recordAudioGranted });
+                return recordAudioGranted;
+            } catch (err) {
+                console.error('Error checking permissions:', err);
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Request necessary permissions on Android
+    const requestPermissions = async (): Promise<boolean> => {
+        if (Platform.OS === 'android') {
+            try {
+                console.log('Requesting RECORD_AUDIO permission...');
+                const granted = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+                    {
+                        title: 'Microphone Permission',
+                        message: 'This app needs access to your microphone for speech-to-text.',
+                        buttonNeutral: 'Ask Me Later',
+                        buttonNegative: 'Deny',
+                        buttonPositive: 'Allow',
+                    }
+                );
+
+                console.log('Permission grant result:', granted);
+                const isGranted = granted === PermissionsAndroid.RESULTS.GRANTED;
+
+                if (!isGranted) {
+                    console.log('Microphone permission was denied');
+                }
+
+                return isGranted;
+            } catch (err) {
+                console.error('Error requesting permissions:', err);
+                return false;
+            }
+        }
+        // iOS permissions handled via Info.plist
+        return true;
+    };
+
+    // Initialize Voice recognition on mount
+    useEffect(() => {
+        const initializeVoice = async () => {
+            console.log('[Init] Starting initialization...');
+            console.log('[Init] USE_WHISPER_API:', USE_WHISPER_API);
+            console.log('[Init] Platform:', Platform.OS);
+
+            // Check permissions FIRST
+            console.log('[Init] Checking permissions...');
+            const alreadyHasPermissions = await checkPermissions();
+            console.log('[Init] Already has permissions:', alreadyHasPermissions);
+
+            if (!alreadyHasPermissions) {
+                console.log('[Init] Requesting permissions...');
+                const granted = await requestPermissions();
+                console.log('[Init] Permissions granted:', granted);
+                setHasPermissions(granted);
+
+                if (!granted) {
+                    console.log('[Init] Permissions denied, cannot initialize AudioRecord');
+                    setIsAvailable(false);
+                    return;
+                }
+            } else {
+                setHasPermissions(true);
+            }
+
+            // NOW initialize AudioRecord after permissions are granted
+            if (USE_WHISPER_API) {
+                try {
+                    // Initialize AudioRecord for Whisper API
+                    console.log('[Whisper] Initializing AudioRecord...');
+                    const options = {
+                        sampleRate: 16000,
+                        channels: 1,
+                        bitsPerSample: 16,
+                        audioSource: 6,
+                        wavFile: 'recording.wav'
+                    };
+                    AudioRecord.init(options);
+                    setIsAvailable(true);
+                    setIsAudioRecordInitialized(true);
+                    console.log('[Whisper] AudioRecord initialized successfully');
+                } catch (initError) {
+                    console.error('[Whisper] AudioRecord initialization error:', initError);
+                    setIsAvailable(false);
+                    setIsAudioRecordInitialized(false);
+                    setError('Failed to initialize audio recorder');
+                }
+            } else {
+                // Initialize React Native Voice for on-device STT
+                try {
+                    console.log('[Voice] Initializing Voice library...');
+                    console.log('[Voice] Voice object:', typeof Voice);
+
+                    // Set up event listeners
+                    Voice.onSpeechStart = () => {
+                        console.log('[Voice] Speech started');
+                        setIsRecording(true);
+                    };
+
+                    Voice.onSpeechEnd = () => {
+                        console.log('[Voice] Speech ended');
+                    };
+
+                    Voice.onSpeechResults = (e: any) => {
+                        console.log('[Voice] Results:', e.value);
+                        if (e.value && e.value.length > 0) {
+                            setTranscript(e.value[0]);
+                        }
+                    };
+
+                    Voice.onSpeechPartialResults = (e: any) => {
+                        console.log('[Voice] Partial results:', e.value);
+                        if (e.value && e.value.length > 0) {
+                            setTranscript(e.value[0]);
+                        }
+                    };
+
+                    Voice.onSpeechError = (e: any) => {
+                        console.error('[Voice] Error:', e.error);
+                        setError(e.error?.message || 'Speech recognition error');
+                        setIsRecording(false);
+                    };
+
+                    console.log('[Voice] Event listeners set up');
+
+                    // Check if Voice is available
+                    try {
+                        console.log('[Voice] Checking availability...');
+                        const available = await Voice.isAvailable();
+                        console.log('[Voice] Raw availability result:', available, typeof available);
+
+                        const isVoiceAvailable = available === 1;
+                        setIsAvailable(isVoiceAvailable);
+                        console.log('[Voice] isVoiceAvailable:', isVoiceAvailable);
+
+                        if (!isVoiceAvailable) {
+                            console.warn('[Voice] Speech recognition not available on this device');
+                            setError('Speech recognition not available. Please use a device with Google/Apple voice services.');
+                        } else {
+                            console.log('[Voice] Speech recognition is available!');
+                        }
+                    } catch (availError) {
+                        console.error('[Voice] Error checking availability:', availError);
+                        setIsAvailable(false);
+                    }
+                } catch (initError) {
+                    console.error('[Voice] Initialization error:', initError);
+                    setIsAvailable(false);
+                    setError('Failed to initialize speech recognition');
+                }
+            }
+
+            console.log('[Init] Initialization complete');
+        };
+
+        initializeVoice();
+
+        return () => {
+            console.log('[Cleanup] Cleaning up...');
+            if (USE_WHISPER_API) {
+                AudioRecord.stop().catch(e => console.log('Stop error:', e));
+            } else {
+                Voice.destroy().then(Voice.removeAllListeners).catch(e => console.log('Cleanup error:', e));
+            }
+        };
+    }, []);
+
+    const uploadAudioForTranscription = async (audioBase64: string): Promise<string> => {
+        try {
+            // Get auth token using authService
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found. Please log in again.');
+            }
+
+            console.log('[STT] Starting audio upload, base64 length:', audioBase64.length);
+
+            // Send base64 directly to backend instead of converting to blob
+            // The backend will handle the base64 decoding
+            const response = await fetch(`${API_CONFIG.BASE_URL}/api/stt/transcribe`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    audio_base64: audioBase64,
+                    language: 'en'
+                }),
+            });
+
+            console.log('[STT] Response status:', response.status);
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                console.error('[STT ERROR] Transcription API error:', data);
+                throw new Error(data.error || 'Transcription failed');
+            }
+
+            console.log('[STT] Transcription successful:', data.text);
+            return data.text;
         } catch (err: any) {
-            console.error('Error starting speech recognition:', err);
-            setError(err.message || 'Failed to start speech recognition');
+            console.error('[STT ERROR] Error uploading audio:', err);
+            throw err;
+        }
+    };
+
+    const startRecording = async () => {
+        console.log('[STT] startRecording called');
+        console.log('[STT] hasPermissions:', hasPermissions);
+        console.log('[STT] isAvailable:', isAvailable);
+        console.log('[STT] isAudioRecordInitialized:', isAudioRecordInitialized);
+        console.log('[STT] USE_WHISPER_API:', USE_WHISPER_API);
+
+        // Check if AudioRecord is initialized (only for Whisper API mode)
+        if (USE_WHISPER_API && !isAudioRecordInitialized) {
+            setError('Audio recorder not initialized. Please restart the app or grant microphone permissions.');
+            console.error('[STT] AudioRecord not initialized');
+            return;
+        }
+
+        // Check if Voice is available (only for on-device mode)
+        if (!USE_WHISPER_API && !isAvailable) {
+            setError('Speech recognition is not available on this device. Please ensure Google/Apple voice services are installed.');
+            return;
+        }
+
+        // Check if we have permissions
+        if (!hasPermissions) {
+            console.log('[STT] Requesting permissions...');
+            const granted = await requestPermissions();
+            console.log('[STT] Permission granted:', granted);
+
+            if (!granted) {
+                setError('Microphone permission is required for speech-to-text. Please enable it in app settings.');
+                return;
+            }
+            setHasPermissions(true);
+
+            // If permissions were just granted, initialize AudioRecord now
+            if (USE_WHISPER_API && !isAudioRecordInitialized) {
+                try {
+                    console.log('[Whisper] Late initializing AudioRecord after permission grant...');
+                    const options = {
+                        sampleRate: 16000,
+                        channels: 1,
+                        bitsPerSample: 16,
+                        audioSource: 6,
+                        wavFile: 'recording.wav'
+                    };
+                    AudioRecord.init(options);
+                    setIsAudioRecordInitialized(true);
+                    console.log('[Whisper] AudioRecord initialized successfully (late init)');
+                } catch (initError) {
+                    console.error('[Whisper] Late AudioRecord initialization error:', initError);
+                    setError('Failed to initialize audio recorder');
+                    return;
+                }
+            }
+        }
+
+        try {
+            // Reset accumulated transcript for new recording
+            accumulatedTranscriptRef.current = '';
+
+            // Reset audio level history for adaptive normalization
+            audioLevelHistoryRef.current = [];
+
+            // Don't clear transcript immediately - wait a bit so we can see streaming results
+            setError(null);
+            setAudioLevel(0);
+            setTranscript('Listening...');
+
+            if (USE_WHISPER_API) {
+                // Use AudioRecord + Whisper API
+                setIsRecording(true);
+                AudioRecord.start();
+                console.log('[Whisper] Recording started');
+                console.log('[Whisper] Streaming enabled:', USE_DEEPGRAM_STREAMING);
+
+                // Setup audio level monitoring with proper listener management
+                setupAudioLevelListener();
+            } else {
+                // Use on-device Voice recognition
+                console.log('[Voice] Starting recognition...');
+                console.log('[Voice] Checking if Voice is ready...');
+
+                // Double-check availability before starting
+                try {
+                    const available = await Voice.isAvailable();
+                    console.log('[Voice] Availability check result:', available);
+
+                    if (!available || available !== 1) {
+                        throw new Error('Voice recognition service is not available on this device. Please install Google app or check your device settings.');
+                    }
+                } catch (availError: any) {
+                    console.error('[Voice] Availability check failed:', availError);
+                    throw new Error('Voice recognition service is not available. Please ensure Google app is installed and voice input is enabled in system settings.');
+                }
+
+                // Try to start Voice recognition
+                try {
+                    console.log('[Voice] Attempting to start with en-US...');
+                    await Voice.start('en-US');
+                    console.log('[Voice] Successfully started with en-US');
+                    setIsRecording(true);
+                } catch (voiceError: any) {
+                    console.error('[Voice] Start error with language:', voiceError);
+                    console.error('[Voice] Error code:', voiceError.code);
+                    console.error('[Voice] Error message:', voiceError.message);
+
+                    // Try with empty string as fallback (required parameter)
+                    try {
+                        console.log('[Voice] Attempting to start with empty locale...');
+                        await Voice.start('');
+                        console.log('[Voice] Successfully started with empty locale');
+                        setIsRecording(true);
+                    } catch (fallbackError: any) {
+                        console.error('[Voice] Fallback start error:', fallbackError);
+                        console.error('[Voice] Fallback error code:', fallbackError.code);
+                        console.error('[Voice] Fallback error message:', fallbackError.message);
+
+                        // Provide specific error message based on error code
+                        if (fallbackError.code === '9' || fallbackError.message?.includes('Insufficient permissions')) {
+                            throw new Error('Microphone permission denied. Please enable microphone access in app settings.');
+                        } else if (fallbackError.code === '8' || fallbackError.message?.includes('not available')) {
+                            throw new Error('Voice recognition service not available. Please install the Google app or enable voice input in system settings.');
+                        } else {
+                            throw new Error(`Voice recognition failed: ${fallbackError.message || 'Unknown error'}. Please rebuild the app (npm run android) to ensure native modules are linked.`);
+                        }
+                    }
+                }
+            }
+        } catch (err: any) {
+            console.error('[STT ERROR] Error starting recording:', err);
+            setError(err.message || 'Failed to start recording');
             setIsRecording(false);
         }
     };
 
-    const stopRecording = async () => {
+    const stopRecording = async (): Promise<string> => {
         try {
-            await Voice.stop();
-            setIsRecording(false);
+            if (USE_WHISPER_API) {
+                // Cleanup audio level listener before stopping
+                cleanupAudioLevelListener();
+
+                // Flush any remaining buffered audio before stopping
+                if (bufferTimeoutRef.current) {
+                    clearTimeout(bufferTimeoutRef.current);
+                    bufferTimeoutRef.current = null;
+                }
+                if (audioBufferRef.current && audioBufferRef.current.length > 0) {
+                    console.log('[Whisper] Flushing remaining buffer before stop, size:', audioBufferRef.current.length);
+                    await sendAudioChunkForTranscription(audioBufferRef.current);
+                    audioBufferRef.current = '';
+                }
+
+                // Whisper API mode: stop AudioRecord and upload
+                const audioFilePath = await AudioRecord.stop();
+                setIsRecording(false);
+                setAudioLevel(0);
+
+                console.log('[Whisper] Recording stopped, file:', audioFilePath);
+
+                if (!audioFilePath || audioFilePath.length === 0) {
+                    throw new Error('No audio data recorded.');
+                }
+
+                const fileExists = await RNFS.exists(audioFilePath);
+                if (!fileExists) {
+                    throw new Error('Audio file not found');
+                }
+
+                const fileInfo = await RNFS.stat(audioFilePath);
+                console.log('[Whisper] File size:', fileInfo.size, 'bytes');
+
+                if (fileInfo.size === 0) {
+                    throw new Error('No audio data recorded.');
+                }
+
+                const audioBase64 = await RNFS.readFile(audioFilePath, 'base64');
+                console.log('[Whisper] Uploading to API...');
+                const transcribedText = await uploadAudioForTranscription(audioBase64);
+
+                // Reset accumulated transcript and set final result
+                accumulatedTranscriptRef.current = '';
+                setTranscript(transcribedText);
+
+                // Clean up
+                await RNFS.unlink(audioFilePath);
+
+                return transcribedText;
+            } else {
+                // On-device Voice mode: just stop
+                console.log('[Voice] Stopping recognition...');
+                await Voice.stop();
+                setIsRecording(false);
+                // Transcript will be set by onSpeechResults callback
+                // Return current transcript value
+                return transcript;
+            }
         } catch (err: any) {
-            console.error('Error stopping speech recognition:', err);
-            setError(err.message || 'Failed to stop speech recognition');
+            console.error('[STT ERROR] Error stopping recording:', err);
+            setError(err.message || 'Failed to process recording');
             setIsRecording(false);
+            return '';
         }
     };
 
     const cancelRecording = async () => {
         try {
-            await Voice.cancel();
+            // Cleanup audio level listener
+            cleanupAudioLevelListener();
+
+            // Reset accumulated transcript
+            accumulatedTranscriptRef.current = '';
+
+            if (USE_WHISPER_API) {
+                await AudioRecord.stop();
+            } else {
+                await Voice.cancel();
+            }
             setTranscript('');
             setIsRecording(false);
+            setAudioLevel(0);
             setError(null);
         } catch (err: any) {
-            console.error('Error canceling speech recognition:', err);
+            console.error('[STT ERROR] Error canceling recording:', err);
         }
     };
+
+    console.log(transcript)
 
     return {
         isRecording,

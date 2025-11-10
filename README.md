@@ -82,6 +82,45 @@ You've successfully run and modified your React Native App. :partying_face:
 - If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
 - If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
 
+# Dynamic Backend Configuration
+
+This app automatically detects your environment and connects to the appropriate backend server:
+
+- **iOS Simulator**: Uses `localhost:5001`
+- **Android Emulator**: Uses `10.0.2.2:5001` (special Android emulator address)
+- **Physical Devices**: Uses your computer's local network IP address
+
+## How It Works
+
+The app uses `react-native-device-info` to automatically detect whether it's running on a simulator/emulator or a physical device, and connects to the backend accordingly.
+
+## Setup for Physical Devices
+
+When you run `npm start`, `npm run ios`, or `npm run android`, the detect-ip script automatically runs and:
+
+1. Detects your computer's local network IP address
+2. Updates `src/config/ip-config.json` with the detected IP
+3. The app reads this configuration at runtime
+
+## Manual IP Configuration
+
+If you need to manually update the backend IP (e.g., if you change networks):
+
+```sh
+npm run detect-ip
+```
+
+This will detect your current IP and update the configuration file.
+
+## Troubleshooting Backend Connection
+
+If the app can't connect to the backend:
+
+1. Make sure the backend server is running on port 5001
+2. For physical devices, ensure your device and computer are on the same network
+3. Run `npm run detect-ip` to update the IP configuration
+4. Check the Metro console for the detected API configuration
+
 # Troubleshooting
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
