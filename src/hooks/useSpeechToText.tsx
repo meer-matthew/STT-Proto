@@ -149,6 +149,16 @@ export function useSpeechToText() {
     const bufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const BUFFER_INTERVAL = 500; // Send buffered audio every 500ms
 
+    // Automatic silence detection for stopping recording
+    const silenceDetectionTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const lastAudioDetectedRef = useRef<number>(0);
+    const SILENCE_DURATION = 1200; // 1.2 seconds of silence before auto-stop (more forgiving)
+    const autoStopCallbackRef = useRef<(() => Promise<void>) | null>(null);
+
+    // Fine-tuned silence threshold detection
+    const silenceCounterRef = useRef(0);
+    const SILENCE_SAMPLES_THRESHOLD = 3; // Require 3 consecutive silent samples before confirming silence
+
 
     /**
      * Send audio chunk to Deepgram streaming endpoint for live transcription
@@ -260,6 +270,7 @@ export function useSpeechToText() {
 
     /**
      * Handle audio data with throttling to prevent excessive state updates
+     * Properly calculates RMS (Root Mean Square) for accurate volume metering
      */
     const handleAudioData = useCallback((data: any) => {
         if (!data) {
@@ -277,49 +288,96 @@ export function useSpeechToText() {
         lastUpdateTimeRef.current = now;
 
         try {
-            // Calculate average audio level from data samples
-            let sum = 0;
+            // Calculate RMS (Root Mean Square) - the proper way to measure audio level
+            // PCM16 audio = 16-bit signed samples, so we need to process 2 bytes per sample
+            let sumSquares = 0;
             let sampleCount = 0;
 
-            // Process each byte as a sample (simpler approach)
-            for (let i = 0; i < data.length; i++) {
-                const byte = data.charCodeAt(i);
-                // Convert byte (0-255) to signed (-128 to 127) range
-                const signed = byte < 128 ? byte : byte - 256;
-                sum += Math.abs(signed);
+            // Process pairs of bytes as 16-bit signed samples
+            for (let i = 0; i < data.length - 1; i += 2) {
+                const byte1 = data.charCodeAt(i);
+                const byte2 = data.charCodeAt(i + 1);
+
+                // Convert two bytes to 16-bit signed integer (little-endian)
+                let sample = (byte2 << 8) | byte1;
+
+                // Convert to signed 16-bit
+                if (sample > 32767) {
+                    sample -= 65536;
+                }
+
+                // Accumulate sum of squares for RMS calculation
+                sumSquares += sample * sample;
                 sampleCount++;
             }
 
-            // Calculate average absolute amplitude
-            const avgLevel = sampleCount > 0 ? sum / sampleCount : 0;
+            // Calculate RMS value (more accurate for audio levels than simple average)
+            const rmsLevel = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
 
-            // Store in history for adaptive normalization
-            audioLevelHistoryRef.current.push(avgLevel);
+            // Store peak in history for adaptive normalization
+            audioLevelHistoryRef.current.push(rmsLevel);
             if (audioLevelHistoryRef.current.length > MAX_HISTORY) {
                 audioLevelHistoryRef.current.shift();
             }
 
-            // Calculate peak from history (helps normalize across different microphones)
+            // Calculate peak from recent history (auto-normalizes to different microphones)
             const peakInHistory = Math.max(...audioLevelHistoryRef.current, 1);
 
-            // Adaptive normalization: use recent peak as reference
-            // This makes the meter work well regardless of mic sensitivity
-            let normalizedLevel = peakInHistory > 0 ? (avgLevel / peakInHistory) * 10 : 0;
-
-            // Apply soft logarithmic scaling for natural feel
-            if (normalizedLevel > 0) {
-                normalizedLevel = Math.log10(normalizedLevel + 1) * 5;
+            // Update silence threshold dynamically based on recent audio (helps with noise floor detection)
+            if (rmsLevel > 0) {
+                silenceThresholdRef.current = Math.max(peakInHistory * 0.02, 50); // 2% of peak, minimum 50
             }
 
-            // Clamp to 0-10 range
-            normalizedLevel = Math.min(10, Math.max(0, normalizedLevel));
+            // Normalize to 0-10 scale based on peak in recent history
+            // RMS peak for 16-bit audio is ~32768, so we normalize relative to recent peak
+            let normalizedLevel = peakInHistory > 0 ? Math.min((rmsLevel / peakInHistory) * 10, 10) : 0;
 
-            // Only update if above noise floor (helps prevent constant buzzing)
-            if (avgLevel > silenceThresholdRef.current) {
-                console.log('[Audio] Avg:', avgLevel.toFixed(1), 'Peak History:', peakInHistory.toFixed(1), 'Level:', normalizedLevel.toFixed(2));
+            // Apply gentle logarithmic scaling for more perceptible low-volume details
+            // This makes quiet sounds more visible on the meter
+            if (normalizedLevel > 0.1) {
+                normalizedLevel = Math.log10(normalizedLevel * 10 + 1) * 3.33; // Scale to keep 0-10 range
+            }
+
+            // Detect audio vs silence for auto-stop feature with hysteresis
+            const isAudible = rmsLevel > silenceThresholdRef.current;
+
+            if (isAudible) {
+                // Audio detected - display level and reset silence counter
+                console.log('[Audio] RMS:', rmsLevel.toFixed(0), 'Peak:', peakInHistory.toFixed(0), 'Level:', normalizedLevel.toFixed(2), 'Threshold:', silenceThresholdRef.current.toFixed(0));
                 setAudioLevel(normalizedLevel);
+                silenceCounterRef.current = 0; // Reset silence counter
+
+                // Reset silence timer when audio is detected
+                lastAudioDetectedRef.current = now;
+                if (silenceDetectionTimerRef.current) {
+                    clearTimeout(silenceDetectionTimerRef.current);
+                    silenceDetectionTimerRef.current = null;
+                    console.log('[Audio] Silence timer cleared - audio detected');
+                }
             } else {
-                setAudioLevel(0); // Silence
+                // Potential silence - increment counter and fade audio level
+                silenceCounterRef.current++;
+                const fadedLevel = Math.max(normalizedLevel - (silenceCounterRef.current * 0.5), 0);
+                setAudioLevel(fadedLevel);
+
+                // Only start auto-stop timer after multiple consecutive silent samples
+                // This prevents false positives from natural speech pauses
+                if (silenceCounterRef.current >= SILENCE_SAMPLES_THRESHOLD && !silenceDetectionTimerRef.current && lastAudioDetectedRef.current > 0) {
+                    // Set a timer to auto-stop if silence persists for SILENCE_DURATION
+                    silenceDetectionTimerRef.current = setTimeout(async () => {
+                        const timeSinceLast = now - lastAudioDetectedRef.current;
+                        if (timeSinceLast >= SILENCE_DURATION && autoStopCallbackRef.current) {
+                            console.log('[Audio] Auto-stopping due to', silenceCounterRef.current, 'consecutive silent samples over', timeSinceLast, 'ms');
+                            silenceDetectionTimerRef.current = null;
+                            try {
+                                await autoStopCallbackRef.current();
+                            } catch (err) {
+                                console.error('[Audio] Error in auto-stop callback:', err);
+                            }
+                        }
+                    }, SILENCE_DURATION);
+                    console.log('[Audio] Silence timer started (' + silenceCounterRef.current + ' samples) - will auto-stop in', SILENCE_DURATION, 'ms');
+                }
             }
 
             // Buffer audio chunk for periodic transcription
@@ -754,6 +812,13 @@ export function useSpeechToText() {
     const stopRecording = async (): Promise<string> => {
         try {
             if (USE_WHISPER_API) {
+                // Cleanup silence detection timer
+                if (silenceDetectionTimerRef.current) {
+                    clearTimeout(silenceDetectionTimerRef.current);
+                    silenceDetectionTimerRef.current = null;
+                    console.log('[Audio] Silence timer cleared on stop');
+                }
+
                 // Cleanup audio level listener before stopping
                 cleanupAudioLevelListener();
 
@@ -822,6 +887,13 @@ export function useSpeechToText() {
 
     const cancelRecording = async () => {
         try {
+            // Cleanup silence detection timer
+            if (silenceDetectionTimerRef.current) {
+                clearTimeout(silenceDetectionTimerRef.current);
+                silenceDetectionTimerRef.current = null;
+                console.log('[Audio] Silence timer cleared on cancel');
+            }
+
             // Cleanup audio level listener
             cleanupAudioLevelListener();
 
@@ -842,6 +914,15 @@ export function useSpeechToText() {
         }
     };
 
+    /**
+     * Set the callback for automatic recording stop after silence
+     * Should be called before startRecording
+     */
+    const setAutoStopCallback = useCallback((callback: (() => Promise<void>) | null) => {
+        autoStopCallbackRef.current = callback;
+        console.log('[Audio] Auto-stop callback', callback ? 'set' : 'cleared');
+    }, []);
+
     console.log(transcript)
 
     return {
@@ -853,5 +934,6 @@ export function useSpeechToText() {
         startRecording,
         stopRecording,
         cancelRecording,
+        setAutoStopCallback,
     };
 }

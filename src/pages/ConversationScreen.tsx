@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
     View,
     ScrollView,
@@ -9,8 +9,6 @@ import {
     SafeAreaView,
     KeyboardAvoidingView,
     Platform,
-    ActivityIndicator,
-    Animated,
     Pressable,
     Image,
 } from 'react-native';
@@ -237,6 +235,7 @@ export function ConversationScreen({ navigation, route }: Props) {
         startRecording,
         stopRecording,
         cancelRecording,
+        setAutoStopCallback,
     } = useSpeechToText();
 
     const { speak, stop, isSpeaking, currentlySpeakingId } = useTextToSpeech();
@@ -257,7 +256,7 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     // Don't show availability alert on mount - only show errors when actually trying to use it
 
-    const handleMicPress = async () => {
+    const handleMicPress = useCallback(async () => {
         if (isRecording) {
             // Show transcribing state
             setIsTranscribing(true);
@@ -284,7 +283,7 @@ export function ConversationScreen({ navigation, route }: Props) {
         } else {
             await startRecording();
         }
-    };
+    }, [isRecording, stopRecording, startRecording, conversationId, username, addMessage, speak, userGender]);
 
     const handleMessageSent = (messageText: string, messageId: string) => {
         // Automatically play TTS when a text message is sent
@@ -313,6 +312,25 @@ export function ConversationScreen({ navigation, route }: Props) {
         const formattedMinutes = minutes.toString().padStart(2, '0');
         return `${formattedHours}:${formattedMinutes} ${ampm}`;
     };
+
+    // Set up automatic recording stop after 1 second of silence
+    useEffect(() => {
+        // Create a callback that will be called when silence is detected
+        const autoStopHandler = async () => {
+            console.log('[Audio] Auto-stop triggered - silence detected for 1 second');
+            if (isRecording) {
+                await handleMicPress(); // This will stop recording and send the message
+            }
+        };
+
+        // Register the callback
+        setAutoStopCallback(autoStopHandler);
+
+        // Cleanup: clear callback when component unmounts
+        return () => {
+            setAutoStopCallback(null);
+        };
+    }, [isRecording, setAutoStopCallback, handleMicPress]);
 
     // Parse configuration to get caregiver count - COMMENTED OUT
     // const caregiverCount = parseInt(configuration.split(':')[0]) || 1;
@@ -491,41 +509,8 @@ export function ConversationScreen({ navigation, route }: Props) {
                                 <SpeechIndicator
                                     text={transcript || "Listening..."}
                                     onCancel={handleCancelRecording}
+                                    isListening={true}
                                 />
-                            )}
-
-                            {(isRecording || isTranscribing) && transcript && (
-                                <View style={styles.loadingMessageContainer}>
-                                    <View style={styles.loadingAvatarContainer}>
-                                        <View style={styles.loadingAvatar} />
-                                    </View>
-                                    <View style={styles.loadingBubbleWrapper}>
-                                        <View style={styles.loadingBubble}>
-                                            <Text style={styles.loadingMessageText}>
-                                                {transcript}
-                                            </Text>
-                                            {isTranscribing && (
-                                                <Text style={styles.processingIndicator}>processing...</Text>
-                                            )}
-                                        </View>
-                                    </View>
-                                </View>
-                            )}
-
-                            {(isRecording || isTranscribing) && !transcript && (
-                                <View style={styles.loadingMessageContainer}>
-                                    <View style={styles.loadingAvatarContainer}>
-                                        <View style={styles.loadingAvatar} />
-                                    </View>
-                                    <View style={styles.loadingBubbleWrapper}>
-                                        <View style={styles.loadingBubble}>
-                                            <ActivityIndicator size="small" color={theme.colors.white} />
-                                            <Text style={styles.loadingMessageText}>
-                                                {isRecording ? 'Listening...' : 'Transcribing...'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </View>
                             )}
                         </View>
                     </ScrollView>
