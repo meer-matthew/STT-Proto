@@ -7,9 +7,14 @@ import DeviceInfo from 'react-native-device-info';
  * This configuration now automatically detects:
  * - iOS Simulator → uses localhost
  * - Android Emulator → uses 10.0.2.2
- * - Physical Devices → uses dynamically detected IP from ip-config.json
+ * - Physical Devices → uses dynamically detected IP from ip-config.json or HEROKU_APP_URL env var
  *
- * To update the backend IP for physical devices, run:
+ * To use Heroku deployment:
+ *   1. Deploy backend to Heroku (see HEROKU_QUICK_START.md)
+ *   2. Set environment variable: HEROKU_APP_URL=https://your-app-name.herokuapp.com
+ *   3. Rebuild APK: npm run build-android-release
+ *
+ * To update the backend IP for local physical devices, run:
  *   npm run detect-ip
  * or
  *   node scripts/detect-ip.js
@@ -29,6 +34,14 @@ const API_PORT = 5001;
 
 // Auto-detect environment and choose appropriate backend URL
 const getBaseUrl = (): string => {
+    // Check if Heroku URL is set (for production APK builds)
+    // Set via: HEROKU_APP_URL=https://your-app-name.herokuapp.com npm run build-android-release
+    const herokuUrl = process.env.HEROKU_APP_URL;
+    if (herokuUrl) {
+        console.log('🚀 Using Heroku backend:', herokuUrl);
+        return herokuUrl;
+    }
+
     // Check if running on emulator/simulator
     const isEmulator = DeviceInfo.isEmulatorSync();
 

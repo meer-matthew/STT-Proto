@@ -14,7 +14,7 @@ export function useTokenExpiration() {
     const navigation = useNavigation<NavigationProp>();
 
     const handleTokenExpired = useCallback(async () => {
-        console.log('Token expired, redirecting to welcome screen');
+        console.log('[Auth] Token expired, redirecting to welcome screen');
 
         // Clear auth data
         await authService.clearAuth();
@@ -39,6 +39,22 @@ export function useTokenExpiration() {
             return true;
         }
         return false;
+    }, [handleTokenExpired]);
+
+    // Periodically check if token has expired
+    useEffect(() => {
+        const checkTokenExpiration = async () => {
+            const isExpired = await authService.isTokenExpired();
+            if (isExpired) {
+                console.warn('[Auth] Token expiration detected, logging out');
+                handleTokenExpired();
+            }
+        };
+
+        // Check every 30 seconds for token expiration
+        const interval = setInterval(checkTokenExpiration, 30000);
+
+        return () => clearInterval(interval);
     }, [handleTokenExpired]);
 
     return { handleTokenExpired, handleAuthError };

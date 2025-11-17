@@ -19,6 +19,7 @@ export interface ApiMessage {
     conversation_id: number;
     sender: string;
     sender_type: 'user' | 'caregiver';
+    sender_gender?: 'male' | 'female' | 'other'; // For TTS voice selection
     message: string;
     has_audio: boolean;
     audio_url?: string;
@@ -215,12 +216,24 @@ class ConversationService {
         conversationId: number,
         message: string,
         senderType: 'user' | 'caregiver' = 'user',
-        hasAudio: boolean = false
+        hasAudio: boolean = false,
+        senderGender?: 'male' | 'female' | 'other'
     ): Promise<ApiMessage> {
         try {
             const token = await authService.getToken();
             if (!token) {
                 throw new Error('No authentication token found');
+            }
+
+            const body: any = {
+                message,
+                sender_type: senderType,
+                has_audio: hasAudio,
+            };
+
+            // Include sender gender if provided (for TTS voice selection)
+            if (senderGender) {
+                body.sender_gender = senderGender;
             }
 
             const response = await fetch(`${API_URL}/${conversationId}/messages`, {
@@ -229,11 +242,7 @@ class ConversationService {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    message,
-                    sender_type: senderType,
-                    has_audio: hasAudio,
-                }),
+                body: JSON.stringify(body),
             });
 
             const data = await response.json();
@@ -284,8 +293,12 @@ class ConversationService {
             }
 
             return data.messages;
-        } catch (error) {
-            console.error('Get messages error:', error);
+        } catch (error: any) {
+            console.error('[ConversationService] Get messages error:', {
+                message: error?.message,
+                code: error?.code,
+                conversationId
+            });
             throw error;
         }
     }
@@ -331,10 +344,10 @@ class ConversationService {
      */
     async addParticipant(conversationId: number, userId: number): Promise<ApiParticipant> {
         try {
-            const token = await authService.getToken();
-            if (!token) {
-                throw new Error('No authentication token found');
-            }
+            // const token = await authService.getToken();
+            // if (!token) {
+            //     throw new Error('No authentication token found');
+            // }
 
             const response = await fetch(`${API_URL}/${conversationId}/participants`, {
                 method: 'POST',
@@ -368,10 +381,10 @@ class ConversationService {
      */
     async removeParticipant(conversationId: number, userId: number): Promise<void> {
         try {
-            const token = await authService.getToken();
-            if (!token) {
-                throw new Error('No authentication token found');
-            }
+            // const token = await authService.getToken();
+            // if (!token) {
+            //     throw new Error('No authentication token found');
+            // }
 
             const response = await fetch(`${API_URL}/${conversationId}/participants/${userId}`, {
                 method: 'DELETE',
@@ -408,15 +421,27 @@ class ConversationService {
         senderType: 'user' | 'caregiver' = 'user',
         hasAudio: boolean = false,
         onChunk: (event: StreamEvent) => void,
-        onError?: (error: Error) => void
+        onError?: (error: Error) => void,
+        senderGender?: 'male' | 'female' | 'other'
     ): Promise<ApiMessage | null> {
         try {
-            const token = await authService.getToken();
-            if (!token) {
-                throw new Error('No authentication token found');
-            }
+            // const token = await authService.getToken();
+            // if (!token) {
+            //     throw new Error('No authentication token found');
+            // }
 
             console.log('[Message Stream] Starting SSE stream for message:', message.substring(0, 50));
+
+            const body: any = {
+                message,
+                sender_type: senderType,
+                has_audio: hasAudio,
+            };
+
+            // Include sender gender if provided (for TTS voice selection)
+            if (senderGender) {
+                body.sender_gender = senderGender;
+            }
 
             const response = await fetch(`${API_URL}/${conversationId}/messages/stream`, {
                 method: 'POST',
@@ -424,11 +449,7 @@ class ConversationService {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    message,
-                    sender_type: senderType,
-                    has_audio: hasAudio,
-                }),
+                body: JSON.stringify(body),
             });
 
             if (!response.ok) {
@@ -508,12 +529,12 @@ class ConversationService {
         onError?: (error: Error) => void
     ): Promise<() => void> {
         try {
-            const token = await authService.getToken();
-            if (!token) {
-                throw new Error('No authentication token found');
-            }
-
-            console.log('[Messages Stream] Starting polling for conversation:', conversationId);
+            // const token = await authService.getToken();
+            // if (!token) {
+            //     throw new Error('No authentication token found');
+            // }
+            //
+            // console.log('[Messages Stream] Starting polling for conversation:', conversationId);
 
             let lastMessageId = 0;
             let pollInterval: NodeJS.Timeout | null = null;
@@ -537,6 +558,9 @@ class ConversationService {
                 try {
                     const messages = await this.getMessages(conversationId);
 
+                    // Check if stream was closed while request was in flight
+                    if (isClosed) return;
+
                     // Find new messages (those with ID greater than lastMessageId)
                     const newMessages = messages.filter(msg => msg.id > lastMessageId);
 
@@ -551,8 +575,16 @@ class ConversationService {
                             onMessage(msg);
                         });
                     }
-                } catch (error) {
-                    console.error('[Messages Stream] Polling error:', error);
+                } catch (error: any) {
+                    // Don't report errors if stream is already closed (component unmounted)
+                    if (isClosed) return;
+
+                    console.error('[Messages Stream] Polling error:', {
+                        message: error?.message,
+                        code: error?.code,
+                        status: error?.status,
+                        type: error?.constructor?.name
+                    });
                     if (onError) {
                         onError(error as Error);
                     }

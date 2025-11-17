@@ -16,6 +16,7 @@ export function useTextToSpeech() {
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [currentlySpeakingId, setCurrentlySpeakingId] = useState<string | null>(null);
     const [currentVoice, setCurrentVoice] = useState<TTSVoice>('onyx'); // Default voice - deep male voice
+    const [volume, setVolume] = useState(0.85); // Default volume normalized to prevent clipping
 
     // Poll for speaking state
     useEffect(() => {
@@ -92,6 +93,18 @@ export function useTextToSpeech() {
         console.log('[TTS Hook] Pitch adjustment not supported with OpenAI TTS');
     };
 
+    /**
+     * Set playback volume (0.0 to 1.0)
+     * Default: 0.85 (normalized to prevent clipping)
+     * Recommended range: 0.7 - 1.0
+     */
+    const setAudioVolume = (newVolume: number) => {
+        // Clamp volume between 0.0 and 1.0
+        const clampedVolume = Math.max(0, Math.min(1, newVolume));
+        setVolume(clampedVolume);
+        console.log('[TTS Hook] Volume set to:', clampedVolume);
+    };
+
     return {
         speak,
         stop,
@@ -99,8 +112,10 @@ export function useTextToSpeech() {
         currentlySpeakingId,
         setRate,
         setPitch,
+        setAudioVolume,
         getAvailableVoices,
         setVoice,
         currentVoice,
+        volume,
     };
 }

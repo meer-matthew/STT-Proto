@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Text, Animated } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Text, Animated, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useConversation } from '../context/ConversationContext';
 import { useTheme } from '../context/ThemeContext';
@@ -10,11 +10,15 @@ type KeyboardInputProps = {
     onMicPress: () => void;
     isRecording: boolean;
     onMessageSent?: (messageText: string, messageId: string) => void;
+    isLoading?: boolean;
+    onSendStart?: () => void;
+    onSendEnd?: () => void;
 };
 
-export function KeyboardInput({ username, conversationId, onMicPress, isRecording, onMessageSent }: KeyboardInputProps) {
+export function KeyboardInput({ username, conversationId, onMicPress, isRecording, onMessageSent, isLoading = false, onSendStart, onSendEnd }: KeyboardInputProps) {
     const [text, setText] = useState('');
     const [showKeyboard, setShowKeyboard] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
     const { addMessage, addMessageWithStream } = useConversation();
     const theme = useTheme();
 
@@ -22,6 +26,8 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const slideAnim = useRef(new Animated.Value(0)).current;
     const recordingPulse = useRef(new Animated.Value(1)).current;
+    const sendButtonScale = useRef(new Animated.Value(1)).current;
+    const focusBorderColor = useRef(new Animated.Value(0)).current;
 
     // Recording pulse animation
     useEffect(() => {
@@ -55,17 +61,59 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
         }).start();
     }, [showKeyboard, slideAnim]);
 
+    // Focus border animation
+    useEffect(() => {
+        Animated.timing(focusBorderColor, {
+            toValue: isFocused ? 1 : 0,
+            duration: 200,
+            useNativeDriver: false,
+        }).start();
+    }, [isFocused, focusBorderColor]);
+
     const handleSend = async () => {
         if (text.trim() && conversationId) {
+            // Send button press animation
+            Animated.sequence([
+                Animated.timing(sendButtonScale, {
+                    toValue: 0.85,
+                    duration: 100,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(sendButtonScale, {
+                    toValue: 1,
+                    duration: 100,
+                    useNativeDriver: true,
+                }),
+            ]).start();
+
+            // Notify parent that sending has started
+            if (onSendStart) {
+                onSendStart();
+            }
+
             const messageText = text.trim();
             setText('');
+            setIsFocused(false);
 
-            // Use streaming to send message - this enables real-time updates
-            const messageId = await addMessageWithStream(conversationId, username, 'user', messageText, false);
+            try {
+                // Use streaming to send message - this enables real-time updates
+                const messageId = await addMessageWithStream(conversationId, username, 'user', messageText, false);
 
-            // Trigger TTS callback if provided
-            if (onMessageSent && messageId) {
-                onMessageSent(messageText, messageId);
+                // Trigger TTS callback if provided - TTS runs in parallel
+                if (onMessageSent && messageId) {
+                    onMessageSent(messageText, messageId);
+                }
+
+                // Clear loading state immediately - TTS runs in background
+                if (onSendEnd) {
+                    onSendEnd();
+                }
+            } catch (error) {
+                // If there's an error sending, clear loading state immediately
+                if (onSendEnd) {
+                    onSendEnd();
+                }
+                console.error('Error sending message:', error);
             }
         }
     };
@@ -106,12 +154,11 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
                         <View style={styles.toggleIndicator} />
                     </TouchableOpacity>
 
-                    <Animated.View style={{
-                        alignItems: 'center',
+                    <Animated.View style={[styles.micButtonAnimatedContainer, {
                         transform: [
                             { scale: Animated.multiply(pulseAnim, recordingPulse) }
                         ]
-                    }}>
+                    }]}>
                         <TouchableOpacity
                             style={[styles.largeMicButton, isRecording && styles.largeMicButtonActive]}
                             onPress={handleMicPress}
@@ -124,7 +171,7 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
                             </Animated.View>
                         </TouchableOpacity>
                         <Text style={styles.micButtonText}>
-                            {isRecording ? "STOP RECORDING" : "TAP TO SPEAK"}
+                            {isRecording ? "Stop Recording" : "Tap to Speak"}
                         </Text>
                     </Animated.View>
                 </View>
@@ -147,26 +194,49 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
                         <View style={styles.toggleIndicator} />
                     </TouchableOpacity>
 
-                    <View style={styles.inputWrapper}>
+                    <Animated.View style={[styles.inputWrapper, {
+                        borderColor: focusBorderColor.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['#e8e8e8', theme.colors.primary]
+                        }),
+                        shadowOpacity: focusBorderColor.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.05, 0.15]
+                        }),
+                    }]}>
+                        <Icon name="comment-o" size={16} color={isFocused ? theme.colors.primary : '#999'} style={styles.inputIcon} />
+
                         <TextInput
                             style={styles.input}
                             placeholder="Type your message..."
                             placeholderTextColor="#999"
                             value={text}
                             onChangeText={setText}
+                            onFocus={() => setIsFocused(true)}
+                            onBlur={() => setIsFocused(false)}
                             multiline
                             maxLength={500}
                             autoFocus
                         />
 
-                        <TouchableOpacity
-                            style={[styles.sendButton, !text.trim() && styles.sendButtonDisabled]}
-                            onPress={handleSend}
-                            disabled={!text.trim()}
-                            activeOpacity={0.7}>
-                            <Icon name="send" size={18} color="#fff" />
-                        </TouchableOpacity>
-                    </View>
+                        {text.length > 0 && (
+                            <Text style={styles.charCount}>{text.length}/500</Text>
+                        )}
+
+                        <Animated.View style={{ transform: [{ scale: sendButtonScale }] }}>
+                            <TouchableOpacity
+                                style={[styles.sendButton, (!text.trim() || isLoading) && styles.sendButtonDisabled]}
+                                onPress={handleSend}
+                                disabled={!text.trim() || isLoading}
+                                activeOpacity={0.7}>
+                                {isLoading ? (
+                                    <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                    <Icon name="send" size={18} color="#fff" />
+                                )}
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </Animated.View>
                 </Animated.View>
             )}
         </View>
@@ -186,6 +256,9 @@ const createStyles = (theme: any) => StyleSheet.create({
         flexDirection: 'column',
         alignItems: 'center',
         gap: theme.spacing.md,
+    },
+    micButtonAnimatedContainer: {
+        alignItems: 'center',
     },
     keyboardModeContainer: {
         flexDirection: 'row',
@@ -255,6 +328,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     micButtonText: {
         fontSize: 16,
         fontWeight: '800',
+        fontFamily: theme.fonts.bold,
         color: theme.colors.text,
         letterSpacing: 1,
         marginTop: theme.spacing.md,
@@ -277,13 +351,24 @@ const createStyles = (theme: any) => StyleSheet.create({
         shadowRadius: 4,
         elevation: 2,
     },
+    inputIcon: {
+        marginRight: 4,
+    },
     input: {
         flex: 1,
         fontSize: 16,
+        fontFamily: theme.fonts.regular,
         color: theme.colors.text,
         maxHeight: 100,
         paddingVertical: 8,
         fontWeight: '500',
+    },
+    charCount: {
+        fontSize: 12,
+        fontFamily: theme.fonts.regular,
+        color: '#999',
+        fontWeight: '500',
+        marginRight: 4,
     },
     sendButton: {
         width: 40,

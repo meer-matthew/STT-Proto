@@ -159,6 +159,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     headerTitle: {
         fontSize: theme.fontSize.xl,
         fontWeight: '700',
+        fontFamily: theme.fonts.bold,
         color: '#1a1a1a',
     },
     newConversationButton: {
@@ -182,12 +183,14 @@ const createStyles = (theme: any) => StyleSheet.create({
     emptyStateText: {
         fontSize: theme.fontSize.lg,
         fontWeight: '600',
+        fontFamily: theme.fonts.bold,
         color: '#666',
         marginTop: theme.spacing.md,
         marginBottom: theme.spacing.xs,
     },
     emptyStateSubtext: {
         fontSize: theme.fontSize.sm,
+        fontFamily: theme.fonts.regular,
         color: '#999',
         textAlign: 'center',
     },
@@ -225,6 +228,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     conversationUsername: {
         fontSize: theme.fontSize.md,
         fontWeight: '600',
+        fontFamily: theme.fonts.bold,
         color: '#1a1a1a',
         flex: 1,
     },
@@ -241,6 +245,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     participantName: {
         fontSize: theme.fontSize.xs,
         fontWeight: '600',
+        fontFamily: theme.fonts.bold,
         color: '#1a1a1a',
     },
     avatarCaretaker: {
@@ -261,11 +266,13 @@ const createStyles = (theme: any) => StyleSheet.create({
     },
     conversationTime: {
         fontSize: theme.fontSize.xs,
+        fontFamily: theme.fonts.regular,
         color: '#999',
         marginLeft: theme.spacing.xs,
     },
     conversationPreview: {
         fontSize: theme.fontSize.sm,
+        fontFamily: theme.fonts.regular,
         color: '#666',
         lineHeight: 18,
     },
@@ -284,6 +291,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     messageCountText: {
         fontSize: 11,
         fontWeight: '600',
+        fontFamily: theme.fonts.bold,
         color: theme.colors.white,
     },
 });

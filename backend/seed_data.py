@@ -33,20 +33,32 @@ def seed_database():
 
         user2 = User(username='jane_smith', email='jane@example.com', user_type='user', gender='female')
         user2.set_password('password123')
+        user3 = User(username='erwin_meer', email='erwin@example.com', user_type='user', gender='male')
+        user3.set_password('password123')
+        user4 = User(username='gotoh', email='gotoh@example.com', user_type='user', gender='male')
+        user4.set_password('password123')
 
         caregiver1 = User(username='alice_care', email='alice@example.com', user_type='caretaker', gender='female')
         caregiver1.set_password('password123')
-
-        db.session.add_all([user1, user2, caregiver1])
+        caregiver2 = User(username='matthew_meer', email='matthew@example.com', user_type='caretaker', gender='male')
+        caregiver2.set_password('password123')
+        caregiver3 = User(username='james_dean', email='james@example.com', user_type='caretaker', gender='male')
+        caregiver3.set_password('password123')
+        db.session.add_all([user1, user2, user3, user4, caregiver1, caregiver2, caregiver3])
         db.session.commit()
 
         print("Assigning roles...")
         # Assign roles
         user_role1 = UserRole(user_id=user1.id, role_id=user_role.id)
         user_role2 = UserRole(user_id=user2.id, role_id=user_role.id)
-        caregiver_role1 = UserRole(user_id=caregiver1.id, role_id=caregiver_role.id)
+        user_role3 = UserRole(user_id=user3.id, role_id=user_role.id)
+        user_role4 = UserRole(user_id=user4.id, role_id=user_role.id)
 
-        db.session.add_all([user_role1, user_role2, caregiver_role1])
+        caregiver_role1 = UserRole(user_id=caregiver1.id, role_id=caregiver_role.id)
+        caregiver_role2 = UserRole(user_id=caregiver2.id, role_id=caregiver_role.id)
+        caregiver_role3 = UserRole(user_id=caregiver3.id, role_id=caregiver_role.id)
+
+        db.session.add_all([user_role1, user_role2, user_role3, user_role4, caregiver_role1, caregiver_role2, caregiver_role3])
         db.session.commit()
 
         print("Creating sample conversations...")

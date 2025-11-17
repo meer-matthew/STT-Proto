@@ -133,6 +133,7 @@ const createStyles = (theme: any, showBorder: boolean, topInset: number) => Styl
     appName: {
         fontSize: theme.fontSize.lg,
         fontWeight: '700',
+        fontFamily: theme.fonts.bold,
         color: theme.colors.primary,
     },
     notificationContainer: {
@@ -188,6 +189,7 @@ const createStyles = (theme: any, showBorder: boolean, topInset: number) => Styl
     dropdownUsername: {
         fontSize: theme.fontSize.md,
         fontWeight: '600',
+        fontFamily: theme.fonts.bold,
         color: theme.colors.text,
     },
     dropdownItem: {
@@ -198,6 +200,7 @@ const createStyles = (theme: any, showBorder: boolean, topInset: number) => Styl
     },
     dropdownItemText: {
         fontSize: theme.fontSize.md,
+        fontFamily: theme.fonts.regular,
         color: '#666',
     },
 });

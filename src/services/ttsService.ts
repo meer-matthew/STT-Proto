@@ -42,6 +42,7 @@ class TTSService {
 
     /**
      * Synthesize text to speech using OpenAI TTS API
+     * Requests HD quality audio for cleaner playback
      */
     async synthesizeSpeech(options: TTSOptions): Promise<string> {
         const { text, voice, gender } = options;
@@ -51,7 +52,7 @@ class TTSService {
 
         return new Promise(async (resolve, reject) => {
             try {
-                console.log('[TTS] Synthesizing speech...');
+                console.log('[TTS] Synthesizing speech with HD quality...');
                 console.log('[TTS] Text length:', text.length);
                 console.log('[TTS] Voice:', selectedVoice);
                 console.log('[TTS] Gender:', gender);
@@ -68,6 +69,7 @@ class TTSService {
                 xhr.setRequestHeader('Authorization', `Bearer ${token}`);
                 xhr.setRequestHeader('Content-Type', 'application/json');
                 xhr.responseType = 'arraybuffer'; // Important for binary data
+                xhr.timeout = 30000; // 30 second timeout for synthesis
 
                 xhr.onload = async () => {
                     try {
@@ -88,8 +90,8 @@ class TTSService {
                         const base64 = btoa(binary);
                         console.log('[TTS] Converted to base64, length:', base64.length);
 
-                        // Save to temporary file
-                        const tempFilePath = `${RNFS.CachesDirectoryPath}/tts_${Date.now()}.mp3`;
+                        // Save to temporary file with timestamp for uniqueness
+                        const tempFilePath = `${RNFS.CachesDirectoryPath}/tts_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp3`;
                         await RNFS.writeFile(tempFilePath, base64, 'base64');
 
                         // Verify file was created
@@ -119,11 +121,17 @@ class TTSService {
                 };
 
                 xhr.ontimeout = () => {
-                    reject(new Error('TTS request timed out'));
+                    reject(new Error('TTS request timed out (exceeded 30 seconds)'));
                 };
 
-                // Send request with selected voice
-                xhr.send(JSON.stringify({ text, voice: selectedVoice }));
+                // Send request with selected voice and request HD quality
+                // HD model provides higher quality audio at 24kHz
+                xhr.send(JSON.stringify({
+                    text,
+                    voice: selectedVoice,
+                    model: 'tts-1-hd', // Request HD quality instead of standard
+                    speed: 1.0 // Normal playback speed
+                }));
             } catch (error: any) {
                 console.error('[TTS ERROR] Speech synthesis failed:', error);
                 reject(error);
@@ -149,7 +157,7 @@ class TTSService {
             // Synthesize speech with gender support
             const audioFilePath = await this.synthesizeSpeech({ text, voice, gender });
 
-            // Create sound instance
+            // Create sound instance with optimized settings
             return new Promise((resolve, reject) => {
                 this.currentSound = new Sound(audioFilePath, '', (error) => {
                     if (error) {
@@ -159,7 +167,20 @@ class TTSService {
                         return;
                     }
 
-                    // Play the sound
+                    console.log('[TTS] Sound loaded successfully');
+                    console.log('[TTS] Duration:', this.currentSound?.getDuration(), 'seconds');
+
+                    // Configure playback settings for optimal audio quality
+                    try {
+                        // Set volume to normalized level (0.85 to prevent clipping)
+                        this.currentSound?.setVolume(0.85);
+
+                        console.log('[TTS] Audio configured: Volume=0.85');
+                    } catch (configError) {
+                        console.warn('[TTS] Could not configure audio settings:', configError);
+                    }
+
+                    // Play the sound with proper error handling
                     this.currentSound?.play((success) => {
                         if (success) {
                             console.log('[TTS] Playback finished successfully');

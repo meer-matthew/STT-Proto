@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import { useTheme } from '../context/ThemeContext';
 
 type SpeakingIndicatorProps = {
     text: string;
@@ -9,51 +10,178 @@ type SpeakingIndicatorProps = {
 };
 
 export function SpeechIndicator({ text, onCancel, isListening = false }: SpeakingIndicatorProps) {
+    const theme = useTheme();
+    const styles = createStyles(theme);
+
     // Animate dots pulsing
     const dot1Anim = useRef(new Animated.Value(0.6)).current;
     const dot2Anim = useRef(new Animated.Value(0.6)).current;
     const dot3Anim = useRef(new Animated.Value(0.6)).current;
 
+    // Word-by-word animation
+    const [displayedText, setDisplayedText] = useState('');
+    const [words, setWords] = useState<string[]>([]);
+    const [wordKeys, setWordKeys] = useState<string[]>([]); // Stable keys for each word
+    const wordOpacityAnims = useRef<Animated.Value[]>([]).current;
+    const cursorOpacity = useRef(new Animated.Value(1)).current;
+    const previousTextRef = useRef('');
+    // Use timestamp + counter to ensure globally unique keys even across resets
+    const wordCounterRef = useRef(0);
+    const instanceIdRef = useRef(Date.now()); // Unique ID for this component instance
+
+    // Cursor blinking animation
     useEffect(() => {
-        // Create staggered pulsing animation for the dots
-        const animateDot = (animValue: Animated.Value, delay: number) => {
-            return Animated.loop(
-                Animated.sequence([
-                    Animated.delay(delay),
-                    Animated.timing(animValue, {
+        if (!isListening) return;
+
+        const cursorAnimation = Animated.loop(
+            Animated.sequence([
+                Animated.timing(cursorOpacity, {
+                    toValue: 0.3,
+                    duration: 500,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(cursorOpacity, {
+                    toValue: 1,
+                    duration: 500,
+                    useNativeDriver: true,
+                }),
+            ])
+        );
+
+        cursorAnimation.start();
+        return () => cursorAnimation.stop();
+    }, [isListening, cursorOpacity]);
+
+    // Handle word-by-word animation when text changes
+    useEffect(() => {
+        if (!text || text.trim() === 'Listening...') {
+            setDisplayedText('');
+            setWords([]);
+            setWordKeys([]);
+            previousTextRef.current = '';
+            return;
+        }
+
+        // Get new words that weren't in the previous text
+        const currentWords = text.trim().split(/\s+/);
+        const previousWords = previousTextRef.current.trim().split(/\s+/).filter(w => w);
+
+        // Determine which words are new
+        const newWordCount = currentWords.length - previousWords.length;
+
+        if (newWordCount > 0) {
+            // New words added - animate them in
+            setWords(currentWords);
+
+            // Generate stable, globally unique keys for each word
+            // Use instanceId to ensure no collisions across different component instances
+            let newKeys: string[];
+
+            if (wordKeys.length === previousWords.length && wordKeys.length > 0) {
+                // Keys are in sync, keep existing keys and add new ones
+                newKeys = [...wordKeys];
+            } else {
+                // Keys are out of sync or don't exist, regenerate all from scratch
+                newKeys = [];
+            }
+
+            // Add keys for new words (using instanceId + counter ensures global uniqueness)
+            for (let i = newKeys.length; i < currentWords.length; i++) {
+                newKeys.push(`${instanceIdRef.current}-word-${wordCounterRef.current++}`);
+            }
+            setWordKeys(newKeys);
+
+            // Create or update opacity animations for new words
+            while (wordOpacityAnims.length < currentWords.length) {
+                wordOpacityAnims.push(new Animated.Value(0));
+            }
+
+            // Animate new words in with staggered timing
+            const animations = wordOpacityAnims
+                .slice(previousWords.length)
+                .map((anim, index) =>
+                    Animated.timing(anim, {
                         toValue: 1,
-                        duration: 400,
+                        duration: 200,
+                        delay: index * 50, // Stagger each word by 50ms
                         useNativeDriver: true,
-                    }),
-                    Animated.timing(animValue, {
-                        toValue: 0.6,
-                        duration: 400,
-                        useNativeDriver: true,
-                    }),
-                ])
-            );
-        };
+                    })
+                );
 
-        const anim1 = animateDot(dot1Anim, 0);
-        const anim2 = animateDot(dot2Anim, 150);
-        const anim3 = animateDot(dot3Anim, 300);
+            Animated.parallel(animations).start();
+        } else if (currentWords.length > 0) {
+            // Text updated but same number of words - show all at once
+            setWords(currentWords);
 
-        anim1.start();
-        anim2.start();
-        anim3.start();
+            // Ensure we have keys for all words
+            if (wordKeys.length < currentWords.length) {
+                const newKeys = [...wordKeys];
+                for (let i = newKeys.length; i < currentWords.length; i++) {
+                    newKeys.push(`${instanceIdRef.current}-word-${wordCounterRef.current++}`);
+                }
+                setWordKeys(newKeys);
+            }
 
-        return () => {
-            anim1.stop();
-            anim2.stop();
-            anim3.stop();
-        };
-    }, [dot1Anim, dot2Anim, dot3Anim]);
+            wordOpacityAnims.forEach(anim => {
+                Animated.timing(anim, {
+                    toValue: 1,
+                    duration: 0,
+                    useNativeDriver: true,
+                }).start();
+            });
+        }
+
+        previousTextRef.current = text;
+    }, [text, isListening]);
+
+    // Update displayed text - show all words that have opacity animations
+    useEffect(() => {
+        if (words.length > 0) {
+            setDisplayedText(words.join(' '));
+        }
+    }, [words]);
 
     // Determine if there's live transcription happening
     const hasTranscription = text && text.trim() !== 'Listening...' && text.trim() !== '';
     const statusText = isListening
         ? (hasTranscription ? 'Transcribing Live...' : 'Listening...')
         : 'Processing...';
+
+    // Render animated words with staggered opacity
+    const renderAnimatedText = () => {
+        if (!hasTranscription) return null;
+
+        return (
+            <View style={styles.animatedWordsContainer}>
+                {words.map((word, index) => {
+                    // Always use the stored key - should never be undefined
+                    const key = wordKeys[index] || `${instanceIdRef.current}-fallback-${index}`;
+                    return (
+                        <Animated.Text
+                            key={key}
+                            style={[
+                                styles.animatedWord,
+                                {
+                                    opacity: wordOpacityAnims[index] || new Animated.Value(1),
+                                },
+                            ]}>
+                            {word}{' '}
+                        </Animated.Text>
+                    );
+                })}
+                {/* Blinking cursor */}
+                <Animated.Text
+                    style={[
+                        styles.cursor,
+                        {
+                            opacity: cursorOpacity,
+                        },
+                    ]}>
+                    |
+                </Animated.Text>
+            </View>
+        );
+    };
 
     return (
         <View style={styles.container}>
@@ -96,11 +224,11 @@ export function SpeechIndicator({ text, onCancel, isListening = false }: Speakin
                     )}
                 </View>
 
-                {/* Live transcription text with visual indicator */}
+                {/* Live transcription text with animated words and cursor */}
                 {hasTranscription ? (
                     <View style={styles.transcriptionContainer}>
                         <Icon name="quote-left" size={12} color="rgba(90, 100, 112, 0.3)" />
-                        <Text style={styles.text}>{text}</Text>
+                        {renderAnimatedText()}
                         <Icon name="quote-right" size={12} color="rgba(90, 100, 112, 0.3)" />
                     </View>
                 ) : (
@@ -114,7 +242,7 @@ export function SpeechIndicator({ text, onCancel, isListening = false }: Speakin
 }
 
 
-const styles = StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
     container: {
         paddingHorizontal: 16,
         marginBottom: 16,
@@ -156,6 +284,7 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontSize: 13,
+        fontFamily: theme.fonts.medium,
         color: '#888',
         flex: 1,
         fontWeight: '500',
@@ -182,13 +311,36 @@ const styles = StyleSheet.create({
     },
     text: {
         fontSize: 16,
+        fontFamily: theme.fonts.regular,
         color: '#000',
         lineHeight: 22,
         flex: 1,
         fontWeight: '500',
     },
+    animatedWordsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        flex: 1,
+        gap: 0,
+    },
+    animatedWord: {
+        fontSize: 16,
+        fontFamily: theme.fonts.regular,
+        color: '#000',
+        fontWeight: '500',
+        lineHeight: 22,
+    },
+    cursor: {
+        fontSize: 16,
+        fontFamily: theme.fonts.regular,
+        color: '#5a6470',
+        fontWeight: '600',
+        marginLeft: 2,
+    },
     listeningPlaceholder: {
         fontSize: 15,
+        fontFamily: theme.fonts.regular,
         color: '#999',
         lineHeight: 20,
         fontStyle: 'italic',

@@ -15,6 +15,33 @@ type MessageBubbleProps = {
     isStreaming?: boolean;
 };
 
+// Color palette for random message backgrounds - more saturated, vibrant colors
+// NOTE: Red is excluded as it's reserved for error states
+const COLOR_PALETTE = [
+    '#2A9D8F', // Deep Teal
+    '#0077B6', // Deep Blue
+    '#FF6B35', // Deep Orange
+    '#06A77D', // Deep Green
+    '#7209B7', // Deep Purple
+    '#00B4D8', // Cyan
+    '#FB5607', // Vibrant Orange
+    '#3A0CA3', // Deep Indigo
+    '#EC4899', // Hot Pink
+    '#059669', // Forest Green
+];
+
+// Generate consistent color based on username
+const getColorForUser = (username: string): string => {
+    let hash = 0;
+    for (let i = 0; i < username.length; i++) {
+        const char = username.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    const index = Math.abs(hash) % COLOR_PALETTE.length;
+    return COLOR_PALETTE[index];
+};
+
 export function MessageBubble({
                                   name,
                                   time,
@@ -27,6 +54,9 @@ export function MessageBubble({
                               }: MessageBubbleProps) {
     const theme = useTheme();
     const styles = createStyles(theme);
+
+    // Get consistent color for this user
+    const userColor = getColorForUser(name);
 
     // Entrance animation
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -146,12 +176,18 @@ export function MessageBubble({
                 <View style={[
                     styles.bubble,
                     isCurrentUser && styles.senderBubble,
+                    !isCurrentUser && {
+                        backgroundColor: userColor,
+                        shadowColor: userColor,
+                        elevation: 6,
+                    },
                     isSpeaking && styles.bubblePlaying,
                     isStreaming && [styles.bubbleStreaming, isCurrentUser && styles.bubbleStreamingSender]
                 ]}>
                     <Text style={[
                         styles.message,
                         isCurrentUser && styles.senderMessage,
+                        !isCurrentUser && styles.receiverMessage,
                         isSpeaking && styles.messagePlaying
                     ]}>
                         {message}
@@ -166,15 +202,16 @@ export function MessageBubble({
 const createStyles = (theme: any) => StyleSheet.create({
     container: {
         flexDirection: 'row',
-        marginBottom: theme.spacing.lg,
+        marginBottom: 18,
         paddingHorizontal: theme.spacing.lg,
-        gap: theme.spacing.sm,
+        gap: theme.spacing.md,
     },
     senderContainer: {
         flexDirection: 'row-reverse',
     },
     avatarContainer: {
-        paddingTop: 8,
+        paddingTop: 0,
+        justifyContent: 'flex-start',
     },
     bubbleWrapper: {
         flex: 1,
@@ -187,24 +224,28 @@ const createStyles = (theme: any) => StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.spacing.sm,
-        marginBottom: theme.spacing.xs,
+        marginBottom: 8,
     },
     name: {
-        fontSize: 15,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
+        fontFamily: theme.fonts.bold,
         color: theme.colors.text,
+        letterSpacing: 0.3,
     },
     time: {
         fontSize: 13,
         fontWeight: '400',
+        fontFamily: theme.fonts.regular,
         color: '#999',
     },
     audioButton: {
         padding: theme.spacing.xs,
-        minWidth: 44,
-        minHeight: 44,
+        minWidth: 48,
+        minHeight: 48,
         justifyContent: 'center',
         alignItems: 'center',
+        marginLeft: 'auto',
     },
     audioButtonActive: {
         backgroundColor: theme.colors.errorLight,
@@ -212,43 +253,68 @@ const createStyles = (theme: any) => StyleSheet.create({
     },
     bubble: {
         backgroundColor: theme.colors.white,
-        borderRadius: 20,
-        borderTopLeftRadius: 4,
-        padding: 16,
-        maxWidth: '75%',
+        borderRadius: 24,
+        borderTopLeftRadius: 6,
+        padding: 28,
+        paddingVertical: 22,
+        maxWidth: '78%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        elevation: 4,
     },
     senderBubble: {
         backgroundColor: theme.colors.primary,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 4,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 6,
+        shadowColor: theme.colors.primary,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+        elevation: 6,
     },
     message: {
-        fontSize: 18,
-        fontWeight: '400',
+        fontSize: 24,
+        fontWeight: '600',
+        fontFamily: theme.fonts.bold,
         color: theme.colors.text,
-        lineHeight: 26,
+        lineHeight: 36,
+        letterSpacing: 0.3,
     },
     senderMessage: {
         color: theme.colors.white,
+        textShadowColor: 'rgba(0, 0, 0, 0.2)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
+    },
+    receiverMessage: {
+        color: '#FFFFFF',
+        fontWeight: '700', // Extra bold for contrast
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
     },
     bubblePlaying: {
-        borderWidth: 2,
+        borderWidth: 2.5,
         borderColor: theme.colors.primary,
     },
     messagePlaying: {
-        fontWeight: '700',
+        fontWeight: '600',
     },
     bubbleStreaming: {
-        borderWidth: 1.5,
+        borderWidth: 2,
         borderColor: theme.colors.primary,
     },
     bubbleStreamingSender: {
         backgroundColor: theme.colors.primary,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.3)',
     },
     streamingDots: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: '400',
         color: theme.colors.primary,
-        marginLeft: 4,
+        marginLeft: 6,
     },
 });

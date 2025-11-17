@@ -4,6 +4,7 @@ import { API_CONFIG } from '../config/api.config';
 const API_URL = API_CONFIG.AUTH_URL;
 const TOKEN_KEY = '@wakaku_auth_token';
 const USER_KEY = '@wakaku_user';
+const TOKEN_EXPIRY_KEY = '@wakaku_token_expiry';
 
 export interface User {
     id: number;
@@ -50,8 +51,8 @@ class AuthService {
                 throw new Error(data.error || 'Registration failed');
             }
 
-            // Store token and user data
-            await this.storeToken(data.token);
+            // Store token and user data with expiration time
+            await this.storeToken(data.token, data.expires_in);
             await this.storeUser(data.user);
 
             return data;
@@ -80,8 +81,8 @@ class AuthService {
                 throw new Error(data.error || 'Login failed');
             }
 
-            // Store token and user data
-            await this.storeToken(data.token);
+            // Store token and user data with expiration time
+            await this.storeToken(data.token, data.expires_in);
             await this.storeUser(data.user);
 
             return data;
@@ -184,11 +185,18 @@ class AuthService {
     }
 
     /**
-     * Store authentication token
+     * Store authentication token with expiration time
      */
-    async storeToken(token: string): Promise<void> {
+    async storeToken(token: string, expiresIn?: number): Promise<void> {
         try {
             await AsyncStorage.setItem(TOKEN_KEY, token);
+
+            // Store expiration timestamp (expires_in is in seconds)
+            if (expiresIn) {
+                const expiryTime = Date.now() + expiresIn * 1000;
+                await AsyncStorage.setItem(TOKEN_EXPIRY_KEY, String(expiryTime));
+                console.log(`[Auth] Token stored with expiry in ${expiresIn} seconds`);
+            }
         } catch (error) {
             console.error('Error storing token:', error);
         }
@@ -199,10 +207,40 @@ class AuthService {
      */
     async getToken(): Promise<string | null> {
         try {
+            // Check if token is expired before returning
+            if (await this.isTokenExpired()) {
+                console.warn('[Auth] Token has expired, clearing auth');
+                await this.clearAuth();
+                return null;
+            }
             return await AsyncStorage.getItem(TOKEN_KEY);
         } catch (error) {
             console.error('Error getting token:', error);
             return null;
+        }
+    }
+
+    /**
+     * Check if token is expired
+     */
+    async isTokenExpired(): Promise<boolean> {
+        try {
+            const expiryTimeStr = await AsyncStorage.getItem(TOKEN_EXPIRY_KEY);
+            if (!expiryTimeStr) {
+                return false; // No expiry time stored, assume valid
+            }
+
+            const expiryTime = parseInt(expiryTimeStr, 10);
+            const isExpired = Date.now() > expiryTime;
+
+            if (isExpired) {
+                console.warn('[Auth] Token has expired');
+            }
+
+            return isExpired;
+        } catch (error) {
+            console.error('Error checking token expiration:', error);
+            return false;
         }
     }
 
@@ -235,7 +273,8 @@ class AuthService {
      */
     async clearAuth(): Promise<void> {
         try {
-            await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+            await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, TOKEN_EXPIRY_KEY]);
+            console.log('[Auth] Authentication data cleared');
         } catch (error) {
             console.error('Error clearing auth:', error);
         }

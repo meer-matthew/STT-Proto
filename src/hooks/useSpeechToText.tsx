@@ -73,8 +73,8 @@ const wrapPCMInWAV = (pcmData: string): string => {
     // "WAVE" format
     header[8] = 0x57; // W
     header[9] = 0x41; // A
-    header[10] = 0x86; // V
-    header[11] = 0x69; // E
+    header[10] = 0x56; // V
+    header[11] = 0x45; // E
 
     // "fmt " subchunk
     header[12] = 0x66; // f
@@ -147,7 +147,7 @@ export function useSpeechToText() {
     // Buffer audio chunks before sending to avoid tiny incomplete fragments
     const audioBufferRef = useRef<string>('');
     const bufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const BUFFER_INTERVAL = 500; // Send buffered audio every 500ms
+    const BUFFER_INTERVAL = 1000; // Send buffered audio every 1000ms (reduced API calls)
 
     // Automatic silence detection for stopping recording
     const silenceDetectionTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -162,88 +162,77 @@ export function useSpeechToText() {
 
     /**
      * Send audio chunk to Deepgram streaming endpoint for live transcription
+     * Optimized with minimal logging for performance
      */
     const sendAudioChunkForTranscription = useCallback(async (audioData: string) => {
         if (!USE_DEEPGRAM_STREAMING) {
-            console.log('[Streaming] Skipped - streaming disabled');
+            console.log('[Streaming] Streaming disabled (USE_DEEPGRAM_STREAMING=false)');
             return;
         }
 
         try {
             const token = await authService.getToken();
             if (!token) {
-                console.warn('[Streaming] ❌ No auth token available');
+                console.warn('[Streaming] No auth token available');
                 return;
             }
 
-            // Wrap PCM data in WAV format so Deepgram can recognize it
-            console.log('[Streaming] 📦 Wrapping PCM in WAV format, PCM size:', audioData.length);
-            let wavAudio;
-            try {
-                wavAudio = wrapPCMInWAV(audioData);
-                console.log('[Streaming] ✓ WAV wrapped - size:', wavAudio.length, 'bytes');
-            } catch (e) {
-                console.warn('[Streaming] ❌ Failed to wrap WAV:', e);
-                return;
-            }
-
-            // Convert to base64 safely
+            // For streaming, send raw PCM chunks WITHOUT WAV headers
+            // (Each chunk shouldn't have its own header - that makes it look like a separate file)
+            // Deepgram will auto-detect the format from the params we send
             let base64Audio;
             try {
-                base64Audio = btoa(wavAudio);
-                console.log('[Streaming] ✓ Audio encoded - size:', base64Audio.length, 'chars');
+                base64Audio = btoa(audioData);
             } catch (e) {
-                console.warn('[Streaming] ❌ Failed to encode audio:', e);
+                console.warn('[Streaming] Audio encoding failed:', e);
                 return;
             }
 
-            const requestBody = {
-                audio_base64: base64Audio,
-                language: 'en',
-                is_final: false,
-                timestamp: Date.now()
-            };
+            console.log('[Streaming] Sending audio chunk to backend, size:', audioData.length, 'bytes');
 
-            console.log('[Streaming] 📤 POST to /api/stt/stream-chunk');
-            const startTime = Date.now();
+            const endpoint = `${API_CONFIG.BASE_URL}/api/stt/stream-chunk`;
+            console.log('[Streaming] Endpoint:', endpoint);
 
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/stt/stream-chunk`, {
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(requestBody),
+                body: JSON.stringify({
+                    audio_base64: base64Audio,
+                    language: 'en',
+                    is_final: false,
+                    timestamp: Date.now()
+                }),
             });
 
-            console.log("RESPON", response)
-
-            const duration = Date.now() - startTime;
-            console.log('[Streaming] 📥 Response status:', response.status, `(${duration}ms)`);
+            console.log('[Streaming] Response status:', response.status);
 
             if (!response.ok) {
+                console.error('[Streaming] API error - status:', response.status);
                 const errorText = await response.text();
-                console.warn('[Streaming] ❌ HTTP Error:', response.status);
-                console.warn('[Streaming] Error response:', errorText.substring(0, 200));
+                console.error('[Streaming] Error response:', errorText);
                 return;
             }
 
             let result;
             try {
                 result = await response.json();
+                console.log('[Streaming] Full response received:', JSON.stringify(result, null, 2));
+                console.log('[Streaming] Response keys:', Object.keys(result));
+                console.log('[Streaming] transcript field:', result.transcript);
+                console.log('[Streaming] transcript type:', typeof result.transcript);
+                console.log('[Streaming] transcript length:', result.transcript ? result.transcript.length : 'N/A');
             } catch (parseErr) {
-                console.warn('[Streaming] ❌ Failed to parse JSON response:', parseErr);
+                console.warn('[Streaming] Failed to parse response:', parseErr);
                 return;
             }
 
-            console.log('[Streaming] ✓ Response parsed');
-            console.log('[Streaming] ✓ Transcript:', result.transcript || '[empty]');
-            console.log('[Streaming] ✓ Confidence:', result.confidence);
-
             // Accumulate transcript from streaming chunks
-            console.log("hello", result.transcript)
             if (result.transcript && result.transcript.trim()) {
                 const newText = result.transcript.trim();
+                console.log('[Streaming] ✓ New transcript chunk:', newText);
 
                 // Only add if it's not already in the accumulated transcript (prevent duplicates)
                 if (!accumulatedTranscriptRef.current.endsWith(newText)) {
@@ -254,29 +243,31 @@ export function useSpeechToText() {
                         accumulatedTranscriptRef.current = newText;
                     }
 
-                    console.log('[Streaming] 📝 NEW TEXT:', newText);
-                    console.log('[Streaming] 📝 ACCUMULATED:', accumulatedTranscriptRef.current);
+                    console.log('[Streaming] ✓ Updated transcript:', accumulatedTranscriptRef.current);
                     setTranscript(accumulatedTranscriptRef.current);
                 } else {
-                    console.log('[Streaming] ℹ️ Text already accumulated, skipping');
+                    console.log('[Streaming] Transcript already ends with:', newText, '- skipping duplicate');
                 }
             } else {
-                console.log('[Streaming] ⚠️ Empty/null transcript in response:', result);
+                console.log('[Streaming] ✗ No transcript in response or empty. Result:', result);
             }
         } catch (err) {
-            console.error('[Streaming] ❌ Fetch Error:', err instanceof Error ? err.message : err);
+            console.error('[Streaming] Unexpected error:', err);
         }
     }, []);
 
     /**
      * Handle audio data with throttling to prevent excessive state updates
      * Properly calculates RMS (Root Mean Square) for accurate volume metering
+     * Optimized for performance with minimal logging
      */
     const handleAudioData = useCallback((data: any) => {
         if (!data) {
-            console.warn('[Audio] No data received');
+            console.log('[Audio] handleAudioData called but data is empty/null');
             return;
         }
+
+        console.log('[Audio] handleAudioData called, data length:', typeof data === 'string' ? data.length : data instanceof Uint8Array ? data.length : 'unknown');
 
         const now = Date.now();
 
@@ -292,14 +283,12 @@ export function useSpeechToText() {
             // PCM16 audio = 16-bit signed samples, so we need to process 2 bytes per sample
             let sumSquares = 0;
             let sampleCount = 0;
+            const dataLen = data.length - 1;
 
-            // Process pairs of bytes as 16-bit signed samples
-            for (let i = 0; i < data.length - 1; i += 2) {
-                const byte1 = data.charCodeAt(i);
-                const byte2 = data.charCodeAt(i + 1);
-
+            // Process pairs of bytes as 16-bit signed samples (optimized loop)
+            for (let i = 0; i < dataLen; i += 2) {
                 // Convert two bytes to 16-bit signed integer (little-endian)
-                let sample = (byte2 << 8) | byte1;
+                let sample = (data.charCodeAt(i + 1) << 8) | data.charCodeAt(i);
 
                 // Convert to signed 16-bit
                 if (sample > 32767) {
@@ -311,81 +300,76 @@ export function useSpeechToText() {
                 sampleCount++;
             }
 
-            // Calculate RMS value (more accurate for audio levels than simple average)
+            // Calculate RMS value
             const rmsLevel = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
 
-            // Store peak in history for adaptive normalization
-            audioLevelHistoryRef.current.push(rmsLevel);
-            if (audioLevelHistoryRef.current.length > MAX_HISTORY) {
-                audioLevelHistoryRef.current.shift();
+            // Store peak in history for adaptive normalization (with early exit)
+            const history = audioLevelHistoryRef.current;
+            history.push(rmsLevel);
+            if (history.length > MAX_HISTORY) {
+                history.shift();
             }
 
-            // Calculate peak from recent history (auto-normalizes to different microphones)
-            const peakInHistory = Math.max(...audioLevelHistoryRef.current, 1);
+            // Calculate peak from recent history - optimized with early tracking
+            let peakInHistory = 1;
+            for (let i = 0; i < history.length; i++) {
+                if (history[i] > peakInHistory) {
+                    peakInHistory = history[i];
+                }
+            }
 
-            // Update silence threshold dynamically based on recent audio (helps with noise floor detection)
+            // Update silence threshold dynamically
             if (rmsLevel > 0) {
-                silenceThresholdRef.current = Math.max(peakInHistory * 0.02, 50); // 2% of peak, minimum 50
+                silenceThresholdRef.current = Math.max(peakInHistory * 0.02, 50);
             }
 
-            // Normalize to 0-10 scale based on peak in recent history
-            // RMS peak for 16-bit audio is ~32768, so we normalize relative to recent peak
+            // Normalize to 0-10 scale
             let normalizedLevel = peakInHistory > 0 ? Math.min((rmsLevel / peakInHistory) * 10, 10) : 0;
 
-            // Apply gentle logarithmic scaling for more perceptible low-volume details
-            // This makes quiet sounds more visible on the meter
+            // Apply gentle logarithmic scaling
             if (normalizedLevel > 0.1) {
-                normalizedLevel = Math.log10(normalizedLevel * 10 + 1) * 3.33; // Scale to keep 0-10 range
+                normalizedLevel = Math.log10(normalizedLevel * 10 + 1) * 3.33;
             }
 
-            // Detect audio vs silence for auto-stop feature with hysteresis
+            // Detect audio vs silence
             const isAudible = rmsLevel > silenceThresholdRef.current;
 
             if (isAudible) {
-                // Audio detected - display level and reset silence counter
-                console.log('[Audio] RMS:', rmsLevel.toFixed(0), 'Peak:', peakInHistory.toFixed(0), 'Level:', normalizedLevel.toFixed(2), 'Threshold:', silenceThresholdRef.current.toFixed(0));
                 setAudioLevel(normalizedLevel);
-                silenceCounterRef.current = 0; // Reset silence counter
-
-                // Reset silence timer when audio is detected
+                silenceCounterRef.current = 0;
                 lastAudioDetectedRef.current = now;
+
                 if (silenceDetectionTimerRef.current) {
                     clearTimeout(silenceDetectionTimerRef.current);
                     silenceDetectionTimerRef.current = null;
-                    console.log('[Audio] Silence timer cleared - audio detected');
                 }
             } else {
-                // Potential silence - increment counter and fade audio level
+                // Silence detected
                 silenceCounterRef.current++;
                 const fadedLevel = Math.max(normalizedLevel - (silenceCounterRef.current * 0.5), 0);
                 setAudioLevel(fadedLevel);
 
-                // Only start auto-stop timer after multiple consecutive silent samples
-                // This prevents false positives from natural speech pauses
+                // Start auto-stop timer only when needed
                 if (silenceCounterRef.current >= SILENCE_SAMPLES_THRESHOLD && !silenceDetectionTimerRef.current && lastAudioDetectedRef.current > 0) {
-                    // Set a timer to auto-stop if silence persists for SILENCE_DURATION
                     silenceDetectionTimerRef.current = setTimeout(async () => {
                         const timeSinceLast = now - lastAudioDetectedRef.current;
                         if (timeSinceLast >= SILENCE_DURATION && autoStopCallbackRef.current) {
-                            console.log('[Audio] Auto-stopping due to', silenceCounterRef.current, 'consecutive silent samples over', timeSinceLast, 'ms');
                             silenceDetectionTimerRef.current = null;
                             try {
                                 await autoStopCallbackRef.current();
                             } catch (err) {
-                                console.error('[Audio] Error in auto-stop callback:', err);
+                                console.error('[Audio] Auto-stop error:', err);
                             }
                         }
                     }, SILENCE_DURATION);
-                    console.log('[Audio] Silence timer started (' + silenceCounterRef.current + ' samples) - will auto-stop in', SILENCE_DURATION, 'ms');
                 }
             }
 
             // Buffer audio chunk for periodic transcription
             if (USE_DEEPGRAM_STREAMING) {
-                // Ensure data is in correct format for Deepgram
+                // Ensure data is in correct format
                 let audioChunk = data;
                 if (typeof data !== 'string') {
-                    // If it's a Buffer or Uint8Array, convert to binary string
                     if (Buffer.isBuffer(data)) {
                         audioChunk = data.toString('binary');
                     } else if (data instanceof Uint8Array) {
@@ -395,23 +379,26 @@ export function useSpeechToText() {
 
                 // Add chunk to buffer
                 audioBufferRef.current += audioChunk;
-                console.log('[Audio] Buffered chunk - total buffer size:', audioBufferRef.current.length);
+                console.log('[Audio] Buffered audio size now:', audioBufferRef.current.length, 'bytes');
 
                 // Clear existing timeout and set a new one to flush periodically
                 if (bufferTimeoutRef.current) {
                     clearTimeout(bufferTimeoutRef.current);
                 }
                 bufferTimeoutRef.current = setTimeout(() => {
+                    console.log('[Audio] Buffer timeout fired, current buffer size:', audioBufferRef.current.length);
                     if (audioBufferRef.current && audioBufferRef.current.length > 0) {
-                        console.log('[Audio] Buffer timeout triggered, flushing buffer size:', audioBufferRef.current.length);
                         const bufferedAudio = audioBufferRef.current;
-                        audioBufferRef.current = ''; // Reset buffer
+                        audioBufferRef.current = '';
+                        console.log('[Audio] Sending buffered audio:', bufferedAudio.length, 'bytes');
                         sendAudioChunkForTranscription(bufferedAudio);
+                    } else {
+                        console.log('[Audio] Buffer was empty at timeout');
                     }
                 }, BUFFER_INTERVAL);
             }
         } catch (err) {
-            console.error('[Audio] Error calculating level:', err);
+            console.error('[Audio] Error:', err);
         }
     }, [sendAudioChunkForTranscription]);
 
@@ -419,9 +406,10 @@ export function useSpeechToText() {
      * Setup audio level listener (called when starting recording)
      */
     const setupAudioLevelListener = useCallback(() => {
-        console.log('[Audio] Setting up audio level listener...');
+        console.log('[Audio] ===== Setting up audio level listener =====');
         console.log('[Audio] AudioRecord type:', typeof AudioRecord);
         console.log('[Audio] AudioRecord.on type:', typeof AudioRecord.on);
+        console.log('[Audio] USE_DEEPGRAM_STREAMING:', USE_DEEPGRAM_STREAMING);
 
         // Remove any existing listener first to prevent duplicates
         if (audioLevelListenerRef.current) {
@@ -436,8 +424,12 @@ export function useSpeechToText() {
         // Add new listener
         audioLevelListenerRef.current = handleAudioData;
         console.log('[Audio] Calling AudioRecord.on("data", handleAudioData)...');
-        AudioRecord.on('data', handleAudioData);
-        console.log('[Audio] Audio level listener attached successfully');
+        try {
+            AudioRecord.on('data', handleAudioData);
+            console.log('[Audio] ✓ Audio level listener attached successfully');
+        } catch (err) {
+            console.error('[Audio] ✗ Failed to attach listener:', err);
+        }
     }, [handleAudioData]);
 
     /**
@@ -857,7 +849,7 @@ export function useSpeechToText() {
                 }
 
                 const audioBase64 = await RNFS.readFile(audioFilePath, 'base64');
-                console.log('[Whisper] Uploading to API...');
+                console.log('[Whisper] Uploading to API...', audioBase64);
                 const transcribedText = await uploadAudioForTranscription(audioBase64);
 
                 // Reset accumulated transcript and set final result
@@ -920,10 +912,7 @@ export function useSpeechToText() {
      */
     const setAutoStopCallback = useCallback((callback: (() => Promise<void>) | null) => {
         autoStopCallbackRef.current = callback;
-        console.log('[Audio] Auto-stop callback', callback ? 'set' : 'cleared');
     }, []);
-
-    console.log(transcript)
 
     return {
         isRecording,

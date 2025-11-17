@@ -48,6 +48,12 @@ export type Theme = {
         medium: number;
         thick: number;
     };
+    fonts: {
+        regular: string;
+        medium: string;
+        bold: string;
+        light: string;
+    };
 };
 
 const defaultTheme: Theme = {
@@ -97,6 +103,12 @@ const defaultTheme: Theme = {
         thin: 1,
         medium: 2,
         thick: 3,
+    },
+    fonts: {
+        regular: 'Segoe UI, system-ui, -apple-system, Roboto, sans-serif',
+        medium: 'Segoe UI, system-ui, -apple-system, Roboto, sans-serif',
+        bold: 'Segoe UI, system-ui, -apple-system, Roboto, sans-serif',
+        light: 'Segoe UI, system-ui, -apple-system, Roboto, sans-serif',
     },
 };
 

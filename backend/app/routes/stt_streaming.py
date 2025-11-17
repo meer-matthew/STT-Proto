@@ -73,12 +73,13 @@ def transcribe_stream_chunk(current_user):
         }
 
         # Build query string with proper parameter formatting
-        # Only include essential parameters that Deepgram supports
+        # For streaming chunks, we receive raw PCM data (no headers)
+        # So we specify the exact encoding format
         params = {
             'model': 'nova-2',
             'language': language,
-            'encoding': 'linear16',
-            'sample_rate': '16000',  # Must be string
+            'encoding': 'linear16',  # Frontend sends raw PCM in 16-bit linear format
+            'sample_rate': '16000',  # Explicitly tell Deepgram the sample rate
         }
 
         print(f"[STT Stream] Sending to Deepgram with params: {params}")
@@ -114,6 +115,7 @@ def transcribe_stream_chunk(current_user):
                 channel = result['results']['channels'][0]
                 print(f"[STT Stream] Channel keys: {channel.keys()}")
                 if 'alternatives' in channel and len(channel['alternatives']) > 0:
+                    print("Hello",channel['alternatives'][0] )
                     alt = channel['alternatives'][0]
                     transcript_text = alt.get('transcript', '')
                     confidence = alt.get('confidence', 0)

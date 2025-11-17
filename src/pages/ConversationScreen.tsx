@@ -66,6 +66,7 @@ export function ConversationScreen({ navigation, route }: Props) {
     const { createConversation, addMessage, addReceivedMessage, getMessages, setCurrentConversation, getCurrentConversation, loadConversation } = useConversation();
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [isSendingMessage, setIsSendingMessage] = useState(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const messages = conversationId ? getMessages(conversationId) : [];
 
@@ -140,7 +141,37 @@ export function ConversationScreen({ navigation, route }: Props) {
                         // Check if this is a message from another user (not sent by current user locally)
                         if (message.sender !== username) {
                             console.log('[ConversationScreen] Received message from:', message.sender);
-                            addReceivedMessage(conversationId, message);
+                            console.log('[ConversationScreen] Message text:', message.message);
+                            console.log('[ConversationScreen] Sender gender:', message.sender_gender);
+
+                            const messageId = addReceivedMessage(conversationId, message);
+                            console.log('[ConversationScreen] Added message with ID:', messageId);
+
+                            // Auto-play TTS for incoming messages from other users
+                            if (messageId && message.message) {
+                                console.log('[ConversationScreen] ✓ Conditions met for TTS - calling speak()');
+                                console.log('[ConversationScreen] TTS params:', {
+                                    text: message.message.substring(0, 50),
+                                    messageId,
+                                    gender: message.sender_gender
+                                });
+
+                                // Use setTimeout to ensure message is rendered first
+                                setTimeout(() => {
+                                    console.log('[ConversationScreen] Executing TTS for message:', messageId);
+                                    try {
+                                        speak(message.message, messageId, message.sender_gender);
+                                        console.log('[ConversationScreen] ✓ speak() called successfully');
+                                    } catch (err) {
+                                        console.error('[ConversationScreen] ✗ Error calling speak():', err);
+                                    }
+                                }, 100);
+                            } else {
+                                console.log('[ConversationScreen] ✗ TTS conditions not met', {
+                                    messageId: !!messageId,
+                                    messageText: !!message.message
+                                });
+                            }
                         } else {
                             // Only log our own messages from polling if they weren't already added locally
                             console.log('[ConversationScreen] Skipping own message from polling');
@@ -148,6 +179,13 @@ export function ConversationScreen({ navigation, route }: Props) {
                     },
                     (error) => {
                         console.error('[ConversationScreen] Message polling error:', error);
+                        console.error('[ConversationScreen] Error details:', {
+                            message: error?.message,
+                            code: error?.code,
+                            status: error?.status,
+                            type: error?.constructor?.name,
+                            fullError: JSON.stringify(error)
+                        });
                     }
                 );
                 streamCleanupRef.current = cleanup;
@@ -165,7 +203,7 @@ export function ConversationScreen({ navigation, route }: Props) {
                 streamCleanupRef.current = null;
             }
         };
-    }, [conversationId, username, addReceivedMessage]);
+    }, [conversationId, username, addReceivedMessage, speak]);
 
     const handleCreateConversation = async () => {
         try {
@@ -242,6 +280,9 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     console.log(transcript)
 
+    // Note: Loading state is now cleared immediately after sending message,
+    // not waiting for TTS to finish. This improves UX responsiveness.
+
     // Auto-scroll to bottom when new messages arrive
     useEffect(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -260,47 +301,55 @@ export function ConversationScreen({ navigation, route }: Props) {
         if (isRecording) {
             // Show transcribing state
             setIsTranscribing(true);
+            setIsSendingMessage(true);
 
             // Stop recording and get the transcribed text directly
             const transcribedText = await stopRecording();
 
-            // Automatically add the message when recording stops
+            // Automatically add the message when recording stops (with gender for TTS voice selection)
             if (transcribedText.trim() && conversationId) {
                 const messageText = transcribedText.trim();
-                const messageId = addMessage(conversationId, username, 'user', messageText, true);
+                const messageId = addMessage(conversationId, username, 'user', messageText, true, userGender);
 
-                // Automatically play TTS for the sent message
+                // Hide transcribing state immediately - don't wait for TTS
+                setIsTranscribing(false);
+                setIsSendingMessage(false);
+
+                // Start TTS in parallel without blocking the UI
                 if (messageId) {
-                    // Small delay to ensure message is rendered
-                    setTimeout(() => {
-                        speak(messageText, messageId, userGender);
-                    }, 100);
+                    // Fire TTS immediately (no delay) - it will start rendering
+                    speak(messageText, messageId, userGender).catch(err => {
+                        console.error('TTS error:', err);
+                    });
                 }
+            } else {
+                // No text to send
+                setIsTranscribing(false);
+                setIsSendingMessage(false);
             }
-
-            // Hide transcribing state
-            setIsTranscribing(false);
         } else {
             await startRecording();
         }
     }, [isRecording, stopRecording, startRecording, conversationId, username, addMessage, speak, userGender]);
 
     const handleMessageSent = (messageText: string, messageId: string) => {
-        // Automatically play TTS when a text message is sent
-        setTimeout(() => {
-            speak(messageText, messageId, userGender);
-        }, 100);
+        // Immediately start TTS without delay - no need to wait for rendering
+        speak(messageText, messageId, userGender).catch(err => {
+            console.error('TTS error:', err);
+        });
     };
 
     const handleCancelRecording = async () => {
         await cancelRecording();
     };
 
-    const handlePlayAudio = (messageId: string, messageText: string) => {
+    const handlePlayAudio = (messageId: string, messageText: string, senderGender?: 'male' | 'female' | 'other') => {
         if (currentlySpeakingId === messageId && isSpeaking) {
             stop();
         } else {
-            speak(messageText, messageId, userGender);
+            // Use sender's gender from message, fallback to current user gender
+            const genderToUse = senderGender || userGender;
+            speak(messageText, messageId, genderToUse);
         }
     };
 
@@ -497,7 +546,7 @@ export function ConversationScreen({ navigation, route }: Props) {
                                             message={message.accumulatedText || message.message}
                                             isCurrentUser={message.sender === username}
                                             hasAudio={message.hasAudio}
-                                            onPlayAudio={() => handlePlayAudio(message.id, message.message)}
+                                            onPlayAudio={() => handlePlayAudio(message.id, message.message, message.sender_gender)}
                                             isSpeaking={currentlySpeakingId === message.id && isSpeaking}
                                             isStreaming={message.isStreaming}
                                         />
@@ -510,6 +559,13 @@ export function ConversationScreen({ navigation, route }: Props) {
                                     text={transcript || "Listening..."}
                                     onCancel={handleCancelRecording}
                                     isListening={true}
+                                />
+                            )}
+
+                            {isTranscribing && !isRecording && (
+                                <SpeechIndicator
+                                    text=""
+                                    isListening={false}
                                 />
                             )}
                         </View>
@@ -525,6 +581,9 @@ export function ConversationScreen({ navigation, route }: Props) {
                                 onMicPress={handleMicPress}
                                 isRecording={isRecording}
                                 onMessageSent={handleMessageSent}
+                                isLoading={isSendingMessage}
+                                onSendStart={() => setIsSendingMessage(true)}
+                                onSendEnd={() => setIsSendingMessage(false)}
                             />
                         </>
                     )}
@@ -730,10 +789,29 @@ const createStyles = (theme: any) => StyleSheet.create({
         lineHeight: 22,
     },
     processingIndicator: {
-        fontSize: 12,
-        fontWeight: '300',
-        color: theme.colors.white,
-        opacity: 0.7,
-        marginTop: theme.spacing.xs,
+        marginHorizontal: theme.spacing.lg,
+        marginBottom: theme.spacing.lg,
+        paddingVertical: theme.spacing.lg,
+        paddingHorizontal: theme.spacing.lg,
+        backgroundColor: theme.colors.white,
+        borderRadius: theme.borderRadius.lg,
+        alignItems: 'center',
+        gap: theme.spacing.md,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    processingContent: {
+        alignItems: 'center',
+        gap: theme.spacing.md,
+    },
+    processingText: {
+        fontSize: 16,
+        fontWeight: '500',
+        fontFamily: theme.fonts.medium,
+        color: theme.colors.text,
+        marginTop: theme.spacing.sm,
     },
 });
