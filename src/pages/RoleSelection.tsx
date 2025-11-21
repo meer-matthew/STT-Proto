@@ -105,7 +105,7 @@ export function RoleSelectionScreen({ navigation, route }: Props) {
 const createStyles = (theme: any) => StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: theme.colors.white,
+        backgroundColor: 'transparent',
     },
     scrollContainer: {
         flexGrow: 1,

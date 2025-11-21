@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: stt-backend
+    runtime: python
+    runtimeVersion: 3.9.18
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --log-file -
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: PORT
+        value: 10000
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPGRAM_API
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stt-postgres
+          property: connectionString
+    disk:
+      name: stt-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  - type: postgres
+    name: stt-postgres
+    ipAllowList: []
+    plan: free
+    postgresMajorVersion: 14

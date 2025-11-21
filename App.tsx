@@ -18,11 +18,11 @@ const styles = StyleSheet.create({
 function App() {
     return (
         <ImageBackground
-            source={require('./assets/images/v904-nunny-010-f.jpg')}
+            // source={require('./assets/images/268_Organic_White_Background.jpg')}
             style={styles.backgroundImage}
             imageStyle={{ opacity: 0.15 }}
         >
-            <SafeAreaProvider>
+            <SafeAreaProvider style={styles.container}>
                 <ThemeProvider>
                     <NavigationContainer>
                         <ConversationProvider>

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { AvatarIcon } from './icons/AvatarIcon';
 import { useTheme } from '../context/ThemeContext';
+import { getAvatarForUser } from '../utils/avatarUtils';
 
 type MessageBubbleProps = {
     name: string;
@@ -142,7 +143,10 @@ export function MessageBubble({
             ]}
         >
             <View style={styles.avatarContainer}>
-                <AvatarIcon variant="small" />
+                <Image
+                    source={getAvatarForUser(name)}
+                    style={styles.avatar}
+                />
             </View>
             <TouchableOpacity
                 activeOpacity={1}
@@ -212,6 +216,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     avatarContainer: {
         paddingTop: 0,
         justifyContent: 'flex-start',
+    },
+    avatar: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
     },
     bubbleWrapper: {
         flex: 1,

@@ -138,12 +138,20 @@ class ConversationService {
 
     /**
      * Create a new conversation
+     *
+     * @param configuration - Conversation configuration (default: '1:1')
+     * @param participantIds - Optional list of user IDs to add as participants
      */
-    async createConversation(configuration: string = '1:1'): Promise<ApiConversation> {
+    async createConversation(configuration: string = '1:1', participantIds?: number[]): Promise<ApiConversation> {
         try {
             const token = await authService.getToken();
             if (!token) {
                 throw new Error('No authentication token found');
+            }
+
+            const body: any = { configuration };
+            if (participantIds && participantIds.length > 0) {
+                body.participant_ids = participantIds;
             }
 
             const response = await fetch(API_URL, {
@@ -152,7 +160,7 @@ class ConversationService {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ configuration }),
+                body: JSON.stringify(body),
             });
 
             const data = await response.json();
@@ -344,10 +352,10 @@ class ConversationService {
      */
     async addParticipant(conversationId: number, userId: number): Promise<ApiParticipant> {
         try {
-            // const token = await authService.getToken();
-            // if (!token) {
-            //     throw new Error('No authentication token found');
-            // }
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
 
             const response = await fetch(`${API_URL}/${conversationId}/participants`, {
                 method: 'POST',
@@ -381,10 +389,10 @@ class ConversationService {
      */
     async removeParticipant(conversationId: number, userId: number): Promise<void> {
         try {
-            // const token = await authService.getToken();
-            // if (!token) {
-            //     throw new Error('No authentication token found');
-            // }
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
 
             const response = await fetch(`${API_URL}/${conversationId}/participants/${userId}`, {
                 method: 'DELETE',
@@ -425,10 +433,10 @@ class ConversationService {
         senderGender?: 'male' | 'female' | 'other'
     ): Promise<ApiMessage | null> {
         try {
-            // const token = await authService.getToken();
-            // if (!token) {
-            //     throw new Error('No authentication token found');
-            // }
+            const token = await authService.getToken();
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
 
             console.log('[Message Stream] Starting SSE stream for message:', message.substring(0, 50));
 
@@ -461,50 +469,36 @@ class ConversationService {
                 throw new Error(data.error || 'Failed to send message with stream');
             }
 
-            // Read the response body as text stream
-            const reader = response.body?.getReader();
-            if (!reader) {
-                throw new Error('Response body is not readable');
-            }
-
-            const decoder = new TextDecoder();
-            let buffer = '';
+            // Read the response body as text
+            // Note: React Native doesn't support ReadableStream.getReader(), so we read as text
+            const responseText = await response.text();
             let finalMessage: ApiMessage | null = null;
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            // Parse the server-sent events
+            const lines = responseText.split('\n');
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
 
-                // Process all complete lines
-                for (let i = 0; i < lines.length - 1; i++) {
-                    const line = lines[i].trim();
+                if (trimmedLine === '' || trimmedLine === ':') continue;
+                if (trimmedLine === '[DONE]') break;
 
-                    if (line === '' || line === ':') continue;
-                    if (line === '[DONE]') break;
+                // Remove "data: " prefix if present
+                if (trimmedLine.startsWith('data: ')) {
+                    const dataStr = trimmedLine.substring(6);
+                    try {
+                        const event = JSON.parse(dataStr) as StreamEvent;
+                        console.log('[Message Stream] Event received:', event.type);
+                        onChunk(event);
 
-                    // Remove "data: " prefix if present
-                    if (line.startsWith('data: ')) {
-                        const dataStr = line.substring(6);
-                        try {
-                            const event = JSON.parse(dataStr) as StreamEvent;
-                            console.log('[Message Stream] Event received:', event.type);
-                            onChunk(event);
-
-                            // Store final message
-                            if (event.type === 'complete' && event.message) {
-                                finalMessage = event.message;
-                            }
-                        } catch (e) {
-                            console.warn('[Message Stream] Failed to parse event:', line, e);
+                        // Store final message
+                        if (event.type === 'complete' && event.message) {
+                            finalMessage = event.message;
                         }
+                    } catch (e) {
+                        console.warn('[Message Stream] Failed to parse event:', trimmedLine, e);
                     }
                 }
-
-                // Keep the last incomplete line in buffer
-                buffer = lines[lines.length - 1];
             }
 
             console.log('[Message Stream] Stream completed');

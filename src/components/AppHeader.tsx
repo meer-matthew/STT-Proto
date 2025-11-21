@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
 import { authService } from '../services/authService';
 import { NotificationBell } from './NotificationBell';
+import { getAvatarForUser } from '../utils/avatarUtils';
 
 type AppHeaderProps = {
     showBorder?: boolean;
@@ -82,9 +83,10 @@ export function AppHeader({ showBorder = true, navigation, showAvatar = true, sh
                         style={styles.avatarButton}
                         onPress={() => setShowDropdown(!showDropdown)}
                         activeOpacity={0.7}>
-                        <View style={styles.avatar}>
-                            <Icon name="user" size={18} color="#fff" />
-                        </View>
+                        <Image
+                            source={getAvatarForUser(username)}
+                            style={styles.avatar}
+                        />
                     </TouchableOpacity>
 
                     {showDropdown && (
@@ -161,9 +163,6 @@ const createStyles = (theme: any, showBorder: boolean, topInset: number) => Styl
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: theme.colors.primary,
-        justifyContent: 'center',
-        alignItems: 'center',
     },
     dropdown: {
         position: 'absolute',

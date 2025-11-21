@@ -52,6 +52,7 @@ class Message(db.Model):
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False, index=True)
     sender = db.Column(db.String(80), nullable=False)
     sender_type = db.Column(db.String(20), nullable=False)  # 'user' or 'caregiver'
+    sender_gender = db.Column(db.String(20), nullable=True)  # 'male', 'female', or 'other' - for TTS voice selection
     message = db.Column(db.Text, nullable=False)
     has_audio = db.Column(db.Boolean, default=False, nullable=False)
     audio_url = db.Column(db.String(500), nullable=True)  # URL to stored audio file
@@ -66,6 +67,7 @@ class Message(db.Model):
             'conversation_id': self.conversation_id,
             'sender': self.sender,
             'sender_type': self.sender_type,
+            'sender_gender': self.sender_gender,
             'message': self.message,
             'has_audio': self.has_audio,
             'audio_url': self.audio_url,

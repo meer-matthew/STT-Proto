@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { useConversation, Conversation } from '../context/ConversationContext';
+import { SelectParticipantsModal } from './SelectParticipantsModal';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
+import { User } from '../services/authService';
+import { conversationService } from '../services/conversationService';
+import { getAvatarForUser } from '../utils/avatarUtils';
 
 type ConversationListProps = {
     onSelectConversation: (conversationId: string) => void;
     selectedConversationId: string | null;
-    onCreateConversation: () => void;
+    onCreateConversation: (selectedUsers?: any[]) => void;
 };
 
 export function ConversationList({ onSelectConversation, selectedConversationId, onCreateConversation }: ConversationListProps) {
@@ -17,6 +21,7 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
     const styles = createStyles(theme);
 
     const [loadingError, setLoadingError] = useState<string | null>(null);
+    const [showSelectParticipants, setShowSelectParticipants] = useState(false);
 
     // Fetch conversations on mount
     useEffect(() => {
@@ -32,6 +37,15 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
 
         loadConversations();
     }, []);
+
+    const handleCreateConversationClick = () => {
+        setShowSelectParticipants(true);
+    };
+
+    const handleConfirmParticipants = async (selectedUsers: User[]) => {
+        setShowSelectParticipants(false);
+        onCreateConversation(selectedUsers);
+    };
 
     const formatDate = (date: Date) => {
         const now = new Date();
@@ -62,11 +76,18 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
                 <Text style={styles.headerTitle}>Conversations</Text>
                 <TouchableOpacity
                     style={styles.newConversationButton}
-                    onPress={onCreateConversation}
+                    onPress={handleCreateConversationClick}
                     activeOpacity={0.7}>
                     <Icon name="plus" size={16} color="#fff" />
                 </TouchableOpacity>
             </View>
+
+            {/* Select Participants Modal */}
+            <SelectParticipantsModal
+                visible={showSelectParticipants}
+                onClose={() => setShowSelectParticipants(false)}
+                onConfirm={handleConfirmParticipants}
+            />
 
             {/* Conversations List */}
         <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
@@ -108,9 +129,10 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
                             ]}
                             onPress={() => onSelectConversation(conversation.id)}
                             activeOpacity={0.7}>
-                            <View style={styles.avatarPlaceholder}>
-                                <Icon name="users" size={20} color="#fff" />
-                            </View>
+                            <Image
+                                source={getAvatarForUser(conversation.username)}
+                                style={styles.avatarPlaceholder}
+                            />
                             <View style={styles.conversationContent}>
                                 <View style={styles.conversationHeader}>
                                     <Text style={styles.conversationUsername}>
@@ -211,9 +233,6 @@ const createStyles = (theme: any) => StyleSheet.create({
         width: 50,
         height: 50,
         borderRadius: 25,
-        backgroundColor: theme.colors.secondary,
-        justifyContent: 'center',
-        alignItems: 'center',
     },
     conversationContent: {
         flex: 1,

@@ -176,10 +176,19 @@ def get_conversations_with_details(current_user):
 @bp.route('/conversations', methods=['POST'])
 @token_required
 def create_conversation(current_user):
-    """Create a new conversation for the current user"""
+    """
+    Create a new conversation for the current user
+
+    Request body:
+    {
+        "configuration": "1:1",  // optional, default is "1:1"
+        "participant_ids": [2, 3, 4]  // optional, list of user IDs to add as participants
+    }
+    """
     try:
         data = request.get_json()
         configuration = data.get('configuration', '1:1')
+        participant_ids = data.get('participant_ids', [])
 
         # Create new conversation
         conversation = Conversation(
@@ -189,9 +198,49 @@ def create_conversation(current_user):
         )
 
         db.session.add(conversation)
+        db.session.flush()  # Flush to get the conversation ID before commit
+
+        # Add participants if provided
+        added_participants = []
+        if participant_ids:
+            for user_id in participant_ids:
+                # Check if user exists and is active
+                user = User.query.get(user_id)
+                if not user or not user.is_active:
+                    # Skip invalid or inactive users, but don't fail the conversation creation
+                    continue
+
+                # Check if already a participant (shouldn't happen, but be safe)
+                existing = ConversationParticipant.query.filter_by(
+                    conversation_id=conversation.id,
+                    user_id=user_id
+                ).first()
+
+                if not existing:
+                    # Add participant
+                    participant = ConversationParticipant(
+                        conversation_id=conversation.id,
+                        user_id=user_id,
+                        added_by=current_user.id
+                    )
+                    db.session.add(participant)
+                    added_participants.append(user_id)
+
+                    # Create notification for the added user
+                    notification = Notification(
+                        user_id=user_id,
+                        type='conversation_added',
+                        title='Added to Conversation',
+                        message=f'{current_user.username} added you to a conversation',
+                        conversation_id=conversation.id
+                    )
+                    db.session.add(notification)
+
         db.session.commit()
 
-        return jsonify(conversation.to_dict()), 201
+        response = conversation.to_dict()
+        response['added_participants'] = added_participants
+        return jsonify(response), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
@@ -223,6 +272,7 @@ def send_message(current_user, conversation_id):
         data = request.get_json()
         sender = data.get('sender', current_user.username)
         sender_type = data.get('sender_type', 'user')
+        sender_gender = data.get('sender_gender', current_user.gender)  # Use current user's gender if not provided
         message_text = data.get('message')
         has_audio = data.get('has_audio', False)
 
@@ -234,6 +284,7 @@ def send_message(current_user, conversation_id):
             conversation_id=conversation_id,
             sender=sender,
             sender_type=sender_type,
+            sender_gender=sender_gender,
             message=message_text,
             has_audio=has_audio
         )
@@ -311,6 +362,7 @@ def stream_message(current_user, conversation_id):
     message_text = data.get('message')
     sender = data.get('sender', current_user.username)
     sender_type = data.get('sender_type', 'user')
+    sender_gender = data.get('sender_gender', current_user.gender)  # Use current user's gender if not provided
     has_audio = data.get('has_audio', False)
 
     if not message_text:
@@ -323,6 +375,7 @@ def stream_message(current_user, conversation_id):
             conversation_id=conversation_id,
             sender=sender,
             sender_type=sender_type,
+            sender_gender=sender_gender,
             message=message_text,
             has_audio=has_audio
         )

@@ -270,7 +270,7 @@ const createStyles = (theme: any) =>
     StyleSheet.create({
         flex: {
             flex: 1,
-            backgroundColor: theme.colors.white,
+            backgroundColor: 'transparent',
 
         },
         scrollContent: {

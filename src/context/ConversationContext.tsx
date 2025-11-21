@@ -10,6 +10,7 @@ export type Message = {
     hasAudio?: boolean;
     isStreaming?: boolean; // Indicates if message is currently streaming
     accumulatedText?: string; // Text accumulated during streaming
+    sender_gender?: 'male' | 'female' | 'other'; // Sender's gender for TTS voice selection
 };
 
 export type Conversation = {
@@ -29,7 +30,7 @@ type ConversationContextType = {
     setCurrentConversation: (id: string) => Promise<void>;
     getCurrentConversation: () => Conversation | null;
     addMessage: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean) => string | null;
-    addMessageWithStream: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean) => Promise<string | null>;
+    addMessageWithStream: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean, senderGender?: 'male' | 'female' | 'other') => Promise<string | null>;
     addReceivedMessage: (conversationId: string, apiMessage: any) => void;
     getMessages: (conversationId: string) => Message[];
     clearConversation: (conversationId: string) => void;
@@ -60,6 +61,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                     message: apiMsg.message,
                     timestamp: new Date(apiMsg.created_at),
                     hasAudio: apiMsg.has_audio,
+                    sender_gender: apiMsg.sender_gender,
                 }));
 
                 const conversation: Conversation = {
@@ -117,6 +119,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                 message: apiMsg.message,
                 timestamp: new Date(apiMsg.created_at),
                 hasAudio: apiMsg.has_audio,
+                sender_gender: apiMsg.sender_gender,
             }));
 
             // Create conversation object
@@ -153,6 +156,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                     message: apiMsg.message,
                     timestamp: new Date(apiMsg.created_at),
                     hasAudio: apiMsg.has_audio,
+                    sender_gender: apiMsg.sender_gender,
                 }));
 
                 // Update conversation with loaded messages
@@ -181,7 +185,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         sender: string,
         senderType: 'user' | 'caregiver',
         message: string,
-        hasAudio: boolean = false
+        hasAudio: boolean = false,
+        senderGender?: 'male' | 'female' | 'other'
     ): string | null => {
         const conversation = conversations.get(conversationId);
         if (!conversation) return null;
@@ -196,6 +201,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             message,
             timestamp: new Date(),
             hasAudio,
+            sender_gender: senderGender,
         };
 
         // Optimistically update UI first
@@ -224,6 +230,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                     message: apiMessage.message,
                     timestamp: new Date(apiMessage.created_at),
                     hasAudio: apiMessage.has_audio,
+                    sender_gender: apiMessage.sender_gender,
                 };
 
                 // Replace temp message with backend message
@@ -257,7 +264,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         sender: string,
         senderType: 'user' | 'caregiver',
         message: string,
-        hasAudio: boolean = false
+        hasAudio: boolean = false,
+        senderGender?: 'male' | 'female' | 'other'
     ): Promise<string | null> => {
         const conversation = conversations.get(conversationId);
         if (!conversation) return null;
@@ -328,6 +336,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                             hasAudio: event.message.has_audio,
                             isStreaming: false,
                             accumulatedText: event.message.message,
+                            sender_gender: event.message.sender_gender,
                         };
 
                         setConversations(prev => {
@@ -369,7 +378,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                             messages: updatedMessages,
                         });
                     });
-                }
+                },
+                senderGender
             );
 
             return finalMessage ? String(finalMessage.id) : tempMessageId;
@@ -395,7 +405,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        // Convert API message to local format
+        // Convert API message to local format, including sender gender for TTS
         const newMessage: Message = {
             id: String(apiMessage.id),
             sender: apiMessage.sender,
@@ -404,6 +414,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             timestamp: new Date(apiMessage.created_at),
             hasAudio: apiMessage.has_audio,
             isStreaming: false,
+            sender_gender: apiMessage.sender_gender,
         };
 
         // Add message to conversation
@@ -417,7 +428,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             });
         });
 
-        console.log('[Context] Received message from:', apiMessage.sender);
+        console.log('[Context] Received message from:', apiMessage.sender, 'Gender:', apiMessage.sender_gender);
     };
 
     const clearConversation = (conversationId: string) => {

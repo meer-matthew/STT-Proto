@@ -216,7 +216,7 @@ export function SelectConfigurationScreen({ navigation, route }: Props) {
 const createStyles = (theme: any) => StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: theme.colors.white,
+        backgroundColor: 'transparent',
     },
     content: {
         flex: 1,

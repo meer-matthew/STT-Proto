@@ -70,11 +70,12 @@ def seed_database():
         db.session.commit()
 
         print("Creating sample messages...")
-        # Create sample messages
+        # Create sample messages with sender gender for TTS voice selection
         msg1 = Message(
             conversation_id=conv1.id,
             sender=user1.username,
             sender_type='user',
+            sender_gender='male',  # John Doe
             message='Hello, this is my first message!',
             has_audio=False
         )
@@ -82,6 +83,7 @@ def seed_database():
             conversation_id=conv1.id,
             sender='alice_care',
             sender_type='caregiver',
+            sender_gender='female',  # Alice Care
             message='Hi! How can I help you today?',
             has_audio=False
         )
@@ -89,6 +91,7 @@ def seed_database():
             conversation_id=conv2.id,
             sender=user2.username,
             sender_type='user',
+            sender_gender='female',  # Jane Smith
             message='Testing speech to text',
             has_audio=True
         )

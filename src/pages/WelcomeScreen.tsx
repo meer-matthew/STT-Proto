@@ -297,7 +297,6 @@ const createStyles = (theme: any) => StyleSheet.create({
         borderWidth: 2,
         borderColor: '#F5F5F5',
         paddingHorizontal: theme.spacing.md,
-        transition: 'all 0.3s ease',
     },
     inputWrapperFocused: {
         borderColor: theme.colors.primary,

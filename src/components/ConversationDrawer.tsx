@@ -17,7 +17,7 @@ type ConversationDrawerProps = {
     onClose: () => void;
     onSelectConversation: (conversationId: string) => void;
     selectedConversationId: string | null;
-    onCreateConversation: () => void;
+    onCreateConversation: (selectedUsers?: any[]) => void;
 };
 
 const DRAWER_WIDTH = Dimensions.get('window').width * 0.75;
@@ -54,8 +54,8 @@ export function ConversationDrawer({
         onClose();
     };
 
-    const handleCreateConversation = () => {
-        onCreateConversation();
+    const handleCreateConversation = (selectedUsers?: any[]) => {
+        onCreateConversation(selectedUsers);
         onClose();
     };
 
