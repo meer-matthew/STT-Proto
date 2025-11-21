@@ -1,5 +1,5 @@
 {
-  "environment": "development",
+  "environment": "production",
   "backends": {
     "development": {
       "url": "http://192.168.68.101:5001",
@@ -10,5 +10,5 @@
       "description": "Live Render backend"
     }
   },
-  "current": "development"
+  "current": "live"
 }
