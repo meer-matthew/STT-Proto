@@ -5,7 +5,7 @@ services:
     runtimeVersion: 3.9.18
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app --log-file -
+    startCommand: gunicorn -w 4 -b 0.0.0.0:10000 wsgi:app --access-logfile - --error-logfile -
     envVars:
       - key: FLASK_ENV
         value: production
