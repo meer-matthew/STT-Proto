@@ -8,7 +8,7 @@ from flask_migrate import Migrate
 db = SQLAlchemy()
 migrate = Migrate()
 
-def create_app():
+def create_app() -> Flask:
     app = Flask(__name__)
 
     # Enable CORS for React Native app

@@ -4,6 +4,7 @@ This file ensures the app can be run from any directory.
 """
 import sys
 import os
+from flask import Flask
 
 # Get the absolute path of this file's directory (backend/)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,7 +16,7 @@ if current_dir not in sys.path:
 # Import and create Flask app
 try:
     from app import create_app
-    app = create_app()
+    app: Flask = create_app()
 except ImportError as e:
     print(f"Error importing app: {e}")
     print(f"Current directory: {current_dir}")
