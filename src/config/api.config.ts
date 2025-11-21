@@ -7,12 +7,13 @@ import DeviceInfo from 'react-native-device-info';
  * This configuration now automatically detects:
  * - iOS Simulator → uses localhost
  * - Android Emulator → uses 10.0.2.2
- * - Physical Devices → uses dynamically detected IP from ip-config.json or HEROKU_APP_URL env var
+ * - Physical Devices → uses dynamically detected IP from ip-config.json or RENDER_APP_URL env var
  *
- * To use Heroku deployment:
- *   1. Deploy backend to Heroku (see HEROKU_QUICK_START.md)
- *   2. Set environment variable: HEROKU_APP_URL=https://your-app-name.herokuapp.com
+ * To use Render deployment:
+ *   1. Deploy backend to Render (see RENDER_QUICK_START.md)
+ *   2. Set environment variable: RENDER_APP_URL=https://your-app-name.onrender.com
  *   3. Rebuild APK: npm run build-android-release
+ *   Example: RENDER_APP_URL=https://stt-proto-1.onrender.com npm run build-android-release
  *
  * To update the backend IP for local physical devices, run:
  *   npm run detect-ip
@@ -34,8 +35,15 @@ const API_PORT = 5001;
 
 // Auto-detect environment and choose appropriate backend URL
 const getBaseUrl = (): string => {
-    // Check if Heroku URL is set (for production APK builds)
-    // Set via: HEROKU_APP_URL=https://your-app-name.herokuapp.com npm run build-android-release
+    // Check if Render URL is set (for production APK builds)
+    // Set via: RENDER_APP_URL=https://your-app-name.onrender.com npm run build-android-release
+    const renderUrl = process.env.RENDER_APP_URL;
+    if (renderUrl) {
+        console.log('🚀 Using Render backend:', renderUrl);
+        return renderUrl;
+    }
+
+    // Also support legacy HEROKU_APP_URL for backward compatibility
     const herokuUrl = process.env.HEROKU_APP_URL;
     if (herokuUrl) {
         console.log('🚀 Using Heroku backend:', herokuUrl);
