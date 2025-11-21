@@ -76,4 +76,6 @@ yarn-error.log
 
 # Dynamic IP Configuration (generated per machine)
 src/config/ip-config.json
+
+# Environment files (backend)
 backend/.env
