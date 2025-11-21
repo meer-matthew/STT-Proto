@@ -1,0 +1,14 @@
+{
+  "environment": "development",
+  "backends": {
+    "development": {
+      "url": "http://192.168.68.101:5001",
+      "description": "Local backend (your machine)"
+    },
+    "live": {
+      "url": "https://stt-proto-1.onrender.com",
+      "description": "Live Render backend"
+    }
+  },
+  "current": "development"
+}

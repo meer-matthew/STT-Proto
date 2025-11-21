@@ -30,12 +30,36 @@ try {
     console.warn('⚠️ Could not load ip-config.json. Run "npm run detect-ip" to generate it.');
 }
 
+// Import backend configuration
+let backendConfig: any = {
+    environment: 'development',
+    backends: {
+        development: { url: 'http://192.168.68.101:5001', description: 'Local backend' },
+        live: { url: 'https://stt-proto-1.onrender.com', description: 'Live Render backend' }
+    },
+    current: 'development'
+};
+
+try {
+    const config = require('./backend-config.json');
+    backendConfig = config;
+} catch (error) {
+    console.warn('⚠️ Could not load backend-config.json. Using defaults.');
+}
+
 // API Configuration
 const API_PORT = 5001;
 
 // Auto-detect environment and choose appropriate backend URL
 const getBaseUrl = (): string => {
-    // Check if Render URL is set (for production APK builds)
+    // Priority 1: Check backend-config.json for current environment
+    if (backendConfig.current && backendConfig.backends[backendConfig.current]) {
+        const url = backendConfig.backends[backendConfig.current].url;
+        console.log(`🚀 Using ${backendConfig.current} backend:`, url);
+        return url;
+    }
+
+    // Priority 2: Check if Render URL is set (for production APK builds)
     // Set via: RENDER_APP_URL=https://your-app-name.onrender.com npm run build-android-release
     const renderUrl = process.env.RENDER_APP_URL;
     if (renderUrl) {
@@ -43,13 +67,7 @@ const getBaseUrl = (): string => {
         return renderUrl;
     }
 
-    // Also support legacy HEROKU_APP_URL for backward compatibility
-    const herokuUrl = process.env.HEROKU_APP_URL;
-    if (herokuUrl) {
-        console.log('🚀 Using Heroku backend:', herokuUrl);
-        return herokuUrl;
-    }
-
+    // Priority 4: Auto-detect based on emulator/device
     // Check if running on emulator/simulator
     const isEmulator = DeviceInfo.isEmulatorSync();
 
