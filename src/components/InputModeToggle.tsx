@@ -12,7 +12,7 @@ export function InputModeToggle() {
                     styles.button,
                     inputMode === 'speech' && styles.activeButton,
                 ]}
-                onPress={() => setInputMode('speech')}
+                onPress={()ƒ => setInputMode('speech')}
                 activeOpacity={0.7}>
                 <Text style={[
                     styles.buttonText,

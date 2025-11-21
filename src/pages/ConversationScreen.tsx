@@ -588,10 +588,7 @@ export function ConversationScreen({ navigation, route }: Props) {
                                             <View style={[styles.actionPanelIcon, { backgroundColor: `${theme.colors.white}30` }]}>
                                                 <Icon name="plus-circle" size={32} color={theme.colors.white} />
                                             </View>
-                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.white }]}>Create New Chat</Text>
-                                            <Text style={[styles.actionPanelSubtitle, { color: `${theme.colors.white}cc` }]}>
-                                                Start a conversation with one or more people
-                                            </Text>
+                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.white, fontSize: 14 }]}>Create</Text>
                                         </Pressable>
 
                                         {/* Select Conversation Panel */}
@@ -605,10 +602,7 @@ export function ConversationScreen({ navigation, route }: Props) {
                                             <View style={[styles.actionPanelIcon, { backgroundColor: `${theme.colors.white}30` }]}>
                                                 <Icon name="folder-open" size={32} color={theme.colors.white} />
                                             </View>
-                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.white }]}>Browse Chats</Text>
-                                            <Text style={[styles.actionPanelSubtitle, { color: `${theme.colors.white}cc` }]}>
-                                                Pick up a previous conversation
-                                            </Text>
+                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.white, fontSize: 14 }]}>Browse</Text>
                                         </Pressable>
                                     </View>
                                 </View>
@@ -827,19 +821,22 @@ const createStyles = (theme: any) => StyleSheet.create({
         alignItems: 'center',
     },
     emptyStateIconBackground: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: `${theme.colors.primary}15`,
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        backgroundColor: `${theme.colors.primary}20`,
         justifyContent: 'center',
         alignItems: 'center',
+        borderWidth: 2,
+        borderColor: `${theme.colors.primary}40`,
     },
     emptyStateTitle: {
-        fontSize: 24,
-        fontWeight: '600',
+        fontSize: 32,
+        fontWeight: '800',
         color: theme.colors.text,
         marginBottom: theme.spacing.md,
         textAlign: 'center',
+        letterSpacing: 0.5,
     },
     emptyStateDescription: {
         fontSize: 16,
@@ -851,46 +848,51 @@ const createStyles = (theme: any) => StyleSheet.create({
     },
     actionPanelsContainer: {
         marginTop: theme.spacing.xl,
-        gap: theme.spacing.md,
+        gap: theme.spacing.lg,
         width: '100%',
-        maxWidth: 280,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     actionPanel: {
-        backgroundColor: theme.colors.white,
-        borderRadius: theme.borderRadius.lg,
-        padding: theme.spacing.lg,
+        width: 140,
+        height: 140,
+        borderRadius: 70,
+        padding: theme.spacing.md,
         alignItems: 'center',
+        justifyContent: 'center',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
-        borderWidth: theme.borderWidth.thin,
-        borderColor: theme.colors.borderLight,
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        elevation: 3,
+        borderWidth: 0,
     },
     actionPanelPressed: {
         opacity: 0.85,
-        transform: [{ scale: 0.98 }],
+        transform: [{ scale: 0.95 }],
     },
     actionPanelIcon: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 64,
+        height: 64,
+        borderRadius: 32,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: theme.spacing.md,
+        marginBottom: theme.spacing.sm,
     },
     actionPanelTitle: {
-        fontSize: theme.fontSize.lg,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
         color: theme.colors.text,
         textAlign: 'center',
-        marginBottom: theme.spacing.xs,
+        letterSpacing: 0.3,
     },
     actionPanelSubtitle: {
-        fontSize: theme.fontSize.sm,
+        fontSize: 14,
+        fontWeight: '500',
         color: theme.colors.textSecondary,
         textAlign: 'center',
+        lineHeight: 20,
     },
     addParticipantButton: {
         width: 36,

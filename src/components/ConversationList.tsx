@@ -22,6 +22,7 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
 
     const [loadingError, setLoadingError] = useState<string | null>(null);
     const [showSelectParticipants, setShowSelectParticipants] = useState(false);
+    const [participantsByConversation, setParticipantsByConversation] = useState<{ [key: string]: any[] }>({});
 
     // Fetch conversations on mount
     useEffect(() => {
@@ -37,6 +38,29 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
 
         loadConversations();
     }, []);
+
+    // Fetch participants for each conversation
+    useEffect(() => {
+        const fetchParticipantsForConversations = async () => {
+            const participantsMap: { [key: string]: any[] } = {};
+
+            for (const conversation of conversationList) {
+                try {
+                    const participants = await conversationService.getParticipants(Number(conversation.id));
+                    participantsMap[conversation.id] = participants;
+                } catch (error) {
+                    console.error(`Failed to fetch participants for conversation ${conversation.id}:`, error);
+                    participantsMap[conversation.id] = [];
+                }
+            }
+
+            setParticipantsByConversation(participantsMap);
+        };
+
+        if (conversationList.length > 0) {
+            fetchParticipantsForConversations();
+        }
+    }, [conversationList.length]);
 
     const handleCreateConversationClick = () => {
         setShowSelectParticipants(true);
@@ -119,6 +143,12 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
             ) : (
                 conversationList.map((conversation) => {
                     const isSelected = conversation.id === selectedConversationId;
+                    const participants = participantsByConversation[conversation.id] || [];
+                    const participantNames = participants
+                        .map(p => p.username)
+                        .slice(0, 3)
+                        .join(', ');
+                    const moreParticipants = participants.length > 3 ? ` +${participants.length - 3}` : '';
 
                     return (
                         <TouchableOpacity
@@ -142,6 +172,11 @@ export function ConversationList({ onSelectConversation, selectedConversationId,
                                         {formatDate(conversation.createdAt)}
                                     </Text>
                                 </View>
+                                {participants.length > 0 && (
+                                    <Text style={styles.participantsText} numberOfLines={1}>
+                                        {participantNames}{moreParticipants}
+                                    </Text>
+                                )}
                                 <Text style={styles.conversationPreview} numberOfLines={2}>
                                     {getLastMessage(conversation)}
                                 </Text>
@@ -250,6 +285,13 @@ const createStyles = (theme: any) => StyleSheet.create({
         fontFamily: theme.fonts.bold,
         color: '#1a1a1a',
         flex: 1,
+    },
+    participantsText: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: '500',
+        fontFamily: theme.fonts.regular,
+        color: '#666',
+        marginBottom: 4,
     },
     participantsList: {
         flex: 1,
