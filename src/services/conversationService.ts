@@ -523,12 +523,15 @@ class ConversationService {
         onError?: (error: Error) => void
     ): Promise<() => void> {
         try {
-            // const token = await authService.getToken();
-            // if (!token) {
-            //     throw new Error('No authentication token found');
-            // }
-            //
-            // console.log('[Messages Stream] Starting polling for conversation:', conversationId);
+            // Check for authentication token before starting to poll
+            const token = await authService.getToken();
+            if (!token) {
+                console.log('[Messages Stream] No authentication token, polling disabled');
+                // Return no-op cleanup function since polling never started
+                return () => {};
+            }
+
+            console.log('[Messages Stream] Starting polling for conversation:', conversationId);
 
             let lastMessageId = 0;
             let pollInterval: NodeJS.Timeout | null = null;
@@ -572,6 +575,18 @@ class ConversationService {
                 } catch (error: any) {
                     // Don't report errors if stream is already closed (component unmounted)
                     if (isClosed) return;
+
+                    // Silently stop polling if auth token is missing (user logged out)
+                    if (error?.message?.includes('No authentication token') ||
+                        error?.status === 401 ||
+                        error?.message?.includes('Unauthorized')) {
+                        console.log('[Messages Stream] Auth token lost, stopping polling');
+                        isClosed = true;
+                        if (pollInterval) {
+                            clearTimeout(pollInterval);
+                        }
+                        return;
+                    }
 
                     console.error('[Messages Stream] Polling error:', {
                         message: error?.message,

@@ -398,32 +398,11 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         const conversation = conversations.get(conversationId);
         if (!conversation) return null;
 
-        // Check if message already exists (prevent duplicates)
-        // This checks:
-        // 1. By backend ID (exact match)
-        // 2. By sender + message content (for completed messages)
-        // 3. By sender + accumulatedText (for streaming messages)
-        const messageExists = conversation.messages.some(msg => {
-            // Check by backend ID
-            if (String(msg.id) === String(apiMessage.id)) {
-                return true;
-            }
-
-            // Check by sender and content (handles completed messages)
-            if (msg.sender === apiMessage.sender && msg.message === apiMessage.message && msg.message.length > 0) {
-                return true;
-            }
-
-            // Check by sender and accumulated text (handles streaming messages with temp IDs)
-            if (msg.sender === apiMessage.sender &&
-                msg.accumulatedText &&
-                msg.accumulatedText === apiMessage.message &&
-                apiMessage.message.length > 0) {
-                return true;
-            }
-
-            return false;
-        });
+        // Simple deduplication: check if message already exists by backend ID
+        // This is the primary dedup - prevents adding the same backend message twice
+        const messageExists = conversation.messages.some(msg =>
+            String(msg.id) === String(apiMessage.id)
+        );
 
         if (messageExists) {
             console.log('[Context] Message already exists:', apiMessage.id, 'sender:', apiMessage.sender);

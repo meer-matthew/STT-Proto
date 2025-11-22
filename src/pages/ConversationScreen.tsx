@@ -65,7 +65,7 @@ export function ConversationScreen({ navigation, route }: Props) {
         fetchUserGender();
     }, []);
 
-    const { createConversation, addMessage, addMessageWithStream, addReceivedMessage, getMessages, setCurrentConversation, getCurrentConversation, loadConversation } = useConversation();
+    const { createConversation, addMessage, addReceivedMessage, getMessages, setCurrentConversation, getCurrentConversation, loadConversation } = useConversation();
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [isSendingMessage, setIsSendingMessage] = useState(false);
@@ -74,6 +74,8 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     // Ref to store stream cleanup function
     const streamCleanupRef = useRef<(() => void) | null>(null);
+    // Ref to track the last message we played TTS for
+    const lastTTSMessageIdRef = useRef<string | null>(null);
 
     // Load conversation if passed as parameter, otherwise show empty state
     useEffect(() => {
@@ -147,25 +149,32 @@ export function ConversationScreen({ navigation, route }: Props) {
                             const messageId = addReceivedMessage(conversationId, message);
                             console.log('[ConversationScreen] Added message with ID:', messageId);
 
-                            // Auto-play TTS for incoming messages from other users
+                            // Auto-play TTS only for the latest received message from other users
+                            // Update the last TTS message ID and only play if this is newer
                             if (messageId && message.message) {
-                                console.log('[ConversationScreen] ✓ Conditions met for TTS - calling speak()');
-                                console.log('[ConversationScreen] TTS params:', {
-                                    text: message.message.substring(0, 50),
-                                    messageId,
-                                    gender: message.sender_gender
-                                });
+                                // Only play TTS if this is a new message (ID different from last one)
+                                if (lastTTSMessageIdRef.current !== messageId) {
+                                    lastTTSMessageIdRef.current = messageId;
+                                    console.log('[ConversationScreen] ✓ Conditions met for TTS - calling speak()');
+                                    console.log('[ConversationScreen] TTS params:', {
+                                        text: message.message.substring(0, 50),
+                                        messageId,
+                                        gender: message.sender_gender
+                                    });
 
-                                // Use setTimeout to ensure message is rendered first
-                                setTimeout(() => {
-                                    console.log('[ConversationScreen] Executing TTS for message:', messageId);
-                                    try {
-                                        speak(message.message, messageId, message.sender_gender);
-                                        console.log('[ConversationScreen] ✓ speak() called successfully');
-                                    } catch (err) {
-                                        console.error('[ConversationScreen] ✗ Error calling speak():', err);
-                                    }
-                                }, 100);
+                                    // Use setTimeout to ensure message is rendered first
+                                    setTimeout(() => {
+                                        console.log('[ConversationScreen] Executing TTS for message:', messageId);
+                                        try {
+                                            speak(message.message, messageId, message.sender_gender);
+                                            console.log('[ConversationScreen] ✓ speak() called successfully');
+                                        } catch (err) {
+                                            console.error('[ConversationScreen] ✗ Error calling speak():', err);
+                                        }
+                                    }, 100);
+                                } else {
+                                    console.log('[ConversationScreen] Message already played TTS:', messageId);
+                                }
                             } else {
                                 console.log('[ConversationScreen] ✗ TTS conditions not met', {
                                     messageId: !!messageId,
@@ -178,6 +187,19 @@ export function ConversationScreen({ navigation, route }: Props) {
                         }
                     },
                     (error) => {
+                        // Gracefully handle auth errors (user logged out, token expired, etc.)
+                        if (error?.message?.includes('No authentication token') ||
+                            error?.status === 401 ||
+                            error?.message?.includes('Unauthorized')) {
+                            console.log('[ConversationScreen] Auth token lost, stopping message polling');
+                            // Stop polling - user has logged out or token expired
+                            if (streamCleanupRef.current) {
+                                streamCleanupRef.current();
+                                streamCleanupRef.current = null;
+                            }
+                            return; // Exit silently on auth errors
+                        }
+
                         console.error('[ConversationScreen] Message polling error:', error);
                         console.error('[ConversationScreen] Error details:', {
                             message: error?.message,
@@ -333,7 +355,9 @@ export function ConversationScreen({ navigation, route }: Props) {
 
                 try {
                     // Send message to backend using stream (same as keyboard input)
-                    const messageId = await addMessageWithStream(conversationId, username, 'user', messageText, true, userGender);
+                    // Send complete transcription as single message (no streaming)
+                    // This avoids race conditions between streaming and polling
+                    const messageId = addMessage(conversationId, username, 'user', messageText, true);
 
                     // Hide transcribing state immediately - don't wait for TTS
                     setIsTranscribing(false);
@@ -369,7 +393,7 @@ export function ConversationScreen({ navigation, route }: Props) {
         } else {
             await startRecording();
         }
-    }, [isRecording, stopRecording, startRecording, conversationId, username, addMessageWithStream, speak, userGender]);
+    }, [isRecording, stopRecording, startRecording, conversationId, username, addMessage, speak, userGender]);
 
     const handleMessageSent = (messageText: string, messageId: string) => {
         // Immediately start TTS without delay - no need to wait for rendering
@@ -544,13 +568,15 @@ export function ConversationScreen({ navigation, route }: Props) {
                                     );
                                 })()}
 
-                                {/* Add Participant Button - Right Side */}
-                                <TouchableOpacity
-                                    style={styles.addParticipantButton}
-                                    onPress={handleAddParticipantClick}
-                                    activeOpacity={0.7}>
-                                    <Icon name="plus" size={16} color={theme.colors.white} />
-                                </TouchableOpacity>
+                                {/* Add Participant Button - Only for conversation creator */}
+                                {username === conversationOwner?.username && (
+                                    <TouchableOpacity
+                                        style={styles.addParticipantButton}
+                                        onPress={handleAddParticipantClick}
+                                        activeOpacity={0.7}>
+                                        <Icon name="plus" size={16} color={theme.colors.white} />
+                                    </TouchableOpacity>
+                                )}
                             </>
                     </View>)}
 
