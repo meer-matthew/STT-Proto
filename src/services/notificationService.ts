@@ -32,7 +32,8 @@ class NotificationService {
         try {
             const token = await authService.getToken();
             if (!token) {
-                throw new Error('No authentication token found');
+                // Return empty notifications if not authenticated instead of throwing
+                return { notifications: [], total: 0 };
             }
 
             const params = new URLSearchParams();
@@ -72,7 +73,8 @@ class NotificationService {
         try {
             const token = await authService.getToken();
             if (!token) {
-                throw new Error('No authentication token found');
+                // Return 0 if not authenticated instead of throwing
+                return 0;
             }
 
             const response = await fetch(`${API_URL}/unread-count`, {

@@ -32,86 +32,6 @@ const btoa = (str: string): string => {
     }
 };
 
-/**
- * Wrap raw PCM audio in WAV header format
- * This allows Deepgram to recognize and transcribe the audio
- */
-const wrapPCMInWAV = (pcmData: string): string => {
-    const SAMPLE_RATE = 16000;
-    const CHANNELS = 1;
-    const BITS_PER_SAMPLE = 16;
-
-    // Convert binary string to Uint8Array for processing
-    let pcmBytes: Uint8Array;
-    if (typeof Buffer !== 'undefined') {
-        pcmBytes = Buffer.from(pcmData, 'binary');
-    } else {
-        // Fallback for environments without Buffer
-        pcmBytes = new Uint8Array(pcmData.length);
-        for (let i = 0; i < pcmData.length; i++) {
-            pcmBytes[i] = pcmData.charCodeAt(i) & 0xFF;
-        }
-    }
-
-    const byteRate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE / 8;
-    const blockAlign = CHANNELS * BITS_PER_SAMPLE / 8;
-    const dataSize = pcmBytes.length;
-    const fileSize = 36 + dataSize;
-
-    // Create WAV header
-    const header = new Uint8Array(44);
-    const view = new DataView(header.buffer);
-
-    // "RIFF" chunk descriptor
-    header[0] = 0x52; // R
-    header[1] = 0x49; // I
-    header[2] = 0x46; // F
-    header[3] = 0x46; // F
-
-    view.setUint32(4, fileSize, true); // File size - 8
-
-    // "WAVE" format
-    header[8] = 0x57; // W
-    header[9] = 0x41; // A
-    header[10] = 0x56; // V
-    header[11] = 0x45; // E
-
-    // "fmt " subchunk
-    header[12] = 0x66; // f
-    header[13] = 0x6d; // m
-    header[14] = 0x74; // t
-    header[15] = 0x20; // (space)
-
-    view.setUint32(16, 16, true); // Subchunk1 size (16 for PCM)
-    view.setUint16(20, 1, true); // Audio format (1 for PCM)
-    view.setUint16(22, CHANNELS, true); // Number of channels
-    view.setUint32(24, SAMPLE_RATE, true); // Sample rate
-    view.setUint32(28, byteRate, true); // Byte rate
-    view.setUint16(32, blockAlign, true); // Block align
-    view.setUint16(34, BITS_PER_SAMPLE, true); // Bits per sample
-
-    // "data" subchunk
-    header[36] = 0x64; // d
-    header[37] = 0x61; // a
-    header[38] = 0x74; // t
-    header[39] = 0x61; // a
-
-    view.setUint32(40, dataSize, true); // Subchunk2 size
-
-    // Combine header and PCM data
-    const wavData = new Uint8Array(header.length + pcmBytes.length);
-    wavData.set(header);
-    wavData.set(pcmBytes, header.length);
-
-    // Convert back to binary string
-    let wavString = '';
-    for (let i = 0; i < wavData.length; i++) {
-        wavString += String.fromCharCode(wavData[i]);
-    }
-
-    return wavString;
-};
-
 // ============================================================
 // CONFIGURATION: Set to true to use Whisper API instead of on-device STT
 // - false (default) = FREE on-device recognition (Google/Apple STT) + LIVE transcription
@@ -267,7 +187,21 @@ export function useSpeechToText() {
             return;
         }
 
-        console.log('[Audio] handleAudioData called, data length:', typeof data === 'string' ? data.length : data instanceof Uint8Array ? data.length : 'unknown');
+        // Ensure data is in string format for processing
+        let audioData = data;
+        if (typeof data !== 'string') {
+            console.log('[Audio] Converting data from', data.constructor.name, 'to string');
+            if (Buffer.isBuffer(data)) {
+                audioData = data.toString('binary');
+            } else if (data instanceof Uint8Array) {
+                audioData = String.fromCharCode(...Array.from(data));
+            } else {
+                console.warn('[Audio] Unknown data type:', data.constructor.name);
+                return;
+            }
+        }
+
+        console.log('[Audio] handleAudioData called, data length:', audioData.length);
 
         const now = Date.now();
 
@@ -283,12 +217,12 @@ export function useSpeechToText() {
             // PCM16 audio = 16-bit signed samples, so we need to process 2 bytes per sample
             let sumSquares = 0;
             let sampleCount = 0;
-            const dataLen = data.length - 1;
+            const dataLen = audioData.length - 1;
 
             // Process pairs of bytes as 16-bit signed samples (optimized loop)
             for (let i = 0; i < dataLen; i += 2) {
                 // Convert two bytes to 16-bit signed integer (little-endian)
-                let sample = (data.charCodeAt(i + 1) << 8) | data.charCodeAt(i);
+                let sample = (audioData.charCodeAt(i + 1) << 8) | audioData.charCodeAt(i);
 
                 // Convert to signed 16-bit
                 if (sample > 32767) {

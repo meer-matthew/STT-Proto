@@ -31,7 +31,7 @@ type ConversationContextType = {
     getCurrentConversation: () => Conversation | null;
     addMessage: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean) => string | null;
     addMessageWithStream: (conversationId: string, sender: string, senderType: 'user' | 'caregiver', message: string, hasAudio?: boolean, senderGender?: 'male' | 'female' | 'other') => Promise<string | null>;
-    addReceivedMessage: (conversationId: string, apiMessage: any) => void;
+    addReceivedMessage: (conversationId: string, apiMessage: any) => string | null;
     getMessages: (conversationId: string) => Message[];
     clearConversation: (conversationId: string) => void;
     fetchUserConversations: () => Promise<void>;
@@ -394,15 +394,40 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         return conversation?.messages || [];
     };
 
-    const addReceivedMessage = (conversationId: string, apiMessage: any): void => {
+    const addReceivedMessage = (conversationId: string, apiMessage: any): string | null => {
         const conversation = conversations.get(conversationId);
-        if (!conversation) return;
+        if (!conversation) return null;
 
-        // Check if message already exists (to prevent duplicates)
-        const messageExists = conversation.messages.some(msg => String(msg.id) === String(apiMessage.id));
+        // Check if message already exists (prevent duplicates)
+        // This checks:
+        // 1. By backend ID (exact match)
+        // 2. By sender + message content (for completed messages)
+        // 3. By sender + accumulatedText (for streaming messages)
+        const messageExists = conversation.messages.some(msg => {
+            // Check by backend ID
+            if (String(msg.id) === String(apiMessage.id)) {
+                return true;
+            }
+
+            // Check by sender and content (handles completed messages)
+            if (msg.sender === apiMessage.sender && msg.message === apiMessage.message && msg.message.length > 0) {
+                return true;
+            }
+
+            // Check by sender and accumulated text (handles streaming messages with temp IDs)
+            if (msg.sender === apiMessage.sender &&
+                msg.accumulatedText &&
+                msg.accumulatedText === apiMessage.message &&
+                apiMessage.message.length > 0) {
+                return true;
+            }
+
+            return false;
+        });
+
         if (messageExists) {
-            console.log('[Context] Message already exists:', apiMessage.id);
-            return;
+            console.log('[Context] Message already exists:', apiMessage.id, 'sender:', apiMessage.sender);
+            return null;
         }
 
         // Convert API message to local format, including sender gender for TTS
@@ -429,6 +454,9 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         });
 
         console.log('[Context] Received message from:', apiMessage.sender, 'Gender:', apiMessage.sender_gender);
+
+        // Return the message ID so caller can trigger TTS
+        return newMessage.id;
     };
 
     const clearConversation = (conversationId: string) => {

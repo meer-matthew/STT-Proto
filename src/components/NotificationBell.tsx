@@ -18,10 +18,32 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
     const [refreshing, setRefreshing] = useState(false);
 
     // Fetch unread count on mount and every 30 seconds
+    // Only fetch if user is authenticated (i.e., this component is rendered)
     useEffect(() => {
-        fetchUnreadCount();
-        const interval = setInterval(fetchUnreadCount, 30000);
-        return () => clearInterval(interval);
+        let interval: NodeJS.Timeout | null = null;
+
+        const initNotifications = async () => {
+            try {
+                const token = await authService.getToken();
+                // Only fetch if token exists
+                if (token) {
+                    await fetchUnreadCount();
+                    // Set up interval to poll every 30 seconds
+                    interval = setInterval(fetchUnreadCount, 30000);
+                }
+            } catch (error) {
+                // Silently fail - if there's an error, user isn't authenticated
+                console.log('[NotificationBell] Skipping notification fetch - user not authenticated');
+            }
+        };
+
+        initNotifications();
+
+        return () => {
+            if (interval) {
+                clearInterval(interval);
+            }
+        };
     }, []);
 
     const fetchUnreadCount = async () => {

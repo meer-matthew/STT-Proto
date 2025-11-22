@@ -152,6 +152,7 @@ export function MessageBubble({
                 activeOpacity={1}
                 onPressIn={handlePressIn}
                 onPressOut={handlePressOut}
+                onPress={handleAudioPress}
                 style={[styles.bubbleWrapper, isCurrentUser && styles.senderBubbleWrapper]}
             >
                 <View style={styles.header}>
