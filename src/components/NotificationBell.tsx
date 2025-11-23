@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Pressable } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
 import { notificationService, Notification } from '../services/notificationService';
@@ -13,9 +13,10 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
     const theme = useTheme();
     const styles = createStyles(theme);
     const [unreadCount, setUnreadCount] = useState(0);
-    const [showModal, setShowModal] = useState(false);
+    const [showDropdown, setShowDropdown] = useState(false);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [refreshing, setRefreshing] = useState(false);
+    const bellRef = useRef<View>(null);
 
     // Fetch unread count on mount and every 30 seconds
     // Only fetch if user is authenticated (i.e., this component is rendered)
@@ -65,8 +66,10 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
     };
 
     const handleBellPress = async () => {
-        setShowModal(true);
-        await fetchNotifications();
+        setShowDropdown(!showDropdown);
+        if (!showDropdown) {
+            await fetchNotifications();
+        }
     };
 
     const handleRefresh = async () => {
@@ -94,7 +97,7 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
                 // Get current user to pass username
                 const user = await authService.getUser();
                 if (user) {
-                    setShowModal(false);
+                    setShowDropdown(false);
                     navigation.navigate('Conversation', {
                         username: user.username,
                         conversationId: notification.conversation_id
@@ -129,8 +132,9 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
     };
 
     return (
-        <>
+        <View style={styles.container}>
             <TouchableOpacity
+                ref={bellRef}
                 style={styles.bellContainer}
                 onPress={handleBellPress}
                 activeOpacity={0.7}>
@@ -144,16 +148,19 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
                 )}
             </TouchableOpacity>
 
-            <Modal
-                visible={showModal}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setShowModal(false)}>
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Notifications</Text>
-                            <View style={styles.modalActions}>
+            {showDropdown && (
+                <>
+                    {/* Overlay to close dropdown when tapping outside */}
+                    <Pressable
+                        style={styles.dropdownOverlay}
+                        onPress={() => setShowDropdown(false)}
+                    />
+
+                    {/* Dropdown Panel */}
+                    <View style={styles.dropdownPanel}>
+                        <View style={styles.dropdownHeader}>
+                            <Text style={styles.dropdownTitle}>Notifications</Text>
+                            <View style={styles.dropdownActions}>
                                 {unreadCount > 0 && (
                                     <TouchableOpacity
                                         onPress={handleMarkAllRead}
@@ -163,10 +170,10 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
                                     </TouchableOpacity>
                                 )}
                                 <TouchableOpacity
-                                    onPress={() => setShowModal(false)}
+                                    onPress={() => setShowDropdown(false)}
                                     style={styles.closeButton}
                                     activeOpacity={0.7}>
-                                    <Icon name="times" size={24} color={theme.colors.text} />
+                                    <Icon name="times" size={18} color={theme.colors.text} />
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -178,7 +185,7 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
                             }>
                             {notifications.length === 0 ? (
                                 <View style={styles.emptyState}>
-                                    <Icon name="bell-slash" size={48} color={theme.colors.borderLight} />
+                                    <Icon name="bell-slash" size={32} color={theme.colors.borderLight} />
                                     <Text style={styles.emptyText}>No notifications</Text>
                                 </View>
                             ) : (
@@ -194,7 +201,7 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
                                         <View style={styles.notificationIcon}>
                                             <Icon
                                                 name={notification.type === 'conversation_added' ? 'users' : 'bell'}
-                                                size={20}
+                                                size={18}
                                                 color={theme.colors.primary}
                                             />
                                         </View>
@@ -217,13 +224,16 @@ export function NotificationBell({ navigation }: NotificationBellProps) {
                             )}
                         </ScrollView>
                     </View>
-                </View>
-            </Modal>
-        </>
+                </>
+            )}
+        </View>
     );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
+    container: {
+        position: 'relative',
+    },
     bellContainer: {
         padding: theme.spacing.sm,
         position: 'relative',
@@ -245,66 +255,75 @@ const createStyles = (theme: any) => StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
     },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'flex-end',
+    dropdownOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
     },
-    modalContent: {
+    dropdownPanel: {
+        position: 'absolute',
+        top: 50,
+        right: 0,
+        width: 360,
+        maxHeight: 500,
         backgroundColor: theme.colors.white,
-        borderTopLeftRadius: theme.borderRadius.lg,
-        borderTopRightRadius: theme.borderRadius.lg,
-        maxHeight: '80%',
-        minHeight: '50%',
+        borderRadius: theme.borderRadius.lg,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+        elevation: 10,
+        zIndex: 1,
+        overflow: 'hidden',
     },
-    modalHeader: {
+    dropdownHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: theme.spacing.lg,
+        padding: theme.spacing.md,
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.borderLight,
+        backgroundColor: theme.colors.white,
     },
-    modalTitle: {
-        fontSize: theme.fontSize.lg,
+    dropdownTitle: {
+        fontSize: theme.fontSize.md,
         fontWeight: '700',
         color: theme.colors.text,
     },
-    modalActions: {
+    dropdownActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: theme.spacing.md,
+        gap: theme.spacing.sm,
     },
     markAllButton: {
-        paddingHorizontal: theme.spacing.md,
-        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.sm,
+        paddingVertical: 4,
     },
     markAllText: {
         color: theme.colors.primary,
-        fontSize: theme.fontSize.sm,
+        fontSize: 11,
         fontWeight: '600',
     },
     closeButton: {
         padding: theme.spacing.xs,
     },
     notificationList: {
-        flex: 1,
+        maxHeight: 400,
     },
     emptyState: {
-        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         padding: theme.spacing.xl,
-        paddingTop: 100,
+        paddingVertical: theme.spacing.xl,
     },
     emptyText: {
-        fontSize: theme.fontSize.md,
+        fontSize: theme.fontSize.sm,
         color: theme.colors.textSecondary,
         marginTop: theme.spacing.md,
     },
     notificationItem: {
         flexDirection: 'row',
-        padding: theme.spacing.md,
+        padding: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.borderLight,
         backgroundColor: theme.colors.white,
@@ -313,37 +332,40 @@ const createStyles = (theme: any) => StyleSheet.create({
         backgroundColor: '#f0f8ff',
     },
     notificationIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         backgroundColor: theme.colors.primaryLight,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: theme.spacing.md,
+        marginRight: theme.spacing.sm,
+        flexShrink: 0,
     },
     notificationContent: {
         flex: 1,
     },
     notificationTitle: {
-        fontSize: theme.fontSize.md,
+        fontSize: theme.fontSize.sm,
         fontWeight: '600',
         color: theme.colors.text,
-        marginBottom: theme.spacing.xs,
+        marginBottom: 2,
     },
     notificationMessage: {
-        fontSize: theme.fontSize.sm,
+        fontSize: 11,
         color: theme.colors.textSecondary,
-        marginBottom: theme.spacing.xs,
+        marginBottom: 2,
+        lineHeight: 14,
     },
     notificationTime: {
-        fontSize: theme.fontSize.xs,
+        fontSize: 10,
         color: theme.colors.textSecondary,
     },
     unreadDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
         backgroundColor: theme.colors.primary,
         marginLeft: theme.spacing.sm,
+        flexShrink: 0,
     },
 });

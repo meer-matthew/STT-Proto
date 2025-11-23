@@ -200,7 +200,6 @@ class ConversationService {
             });
 
             const data = await response.json();
-
             if (!response.ok) {
                 // Handle token expiration
                 if (response.status === 401) {

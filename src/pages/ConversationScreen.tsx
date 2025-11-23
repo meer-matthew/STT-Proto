@@ -11,6 +11,7 @@ import {
     Platform,
     Pressable,
     Image,
+    Modal,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -45,6 +46,8 @@ export function ConversationScreen({ navigation, route }: Props) {
     const [showConversationDrawer, setShowConversationDrawer] = useState(false);
     const [showSelectParticipantsForCreate, setShowSelectParticipantsForCreate] = useState(false);
     const [userGender, setUserGender] = useState<'male' | 'female' | 'other' | undefined>(undefined);
+    const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
+    const [showParticipantModal, setShowParticipantModal] = useState(false);
 
     // Token expiration handler
     const { handleAuthError } = useTokenExpiration();
@@ -96,6 +99,13 @@ export function ConversationScreen({ navigation, route }: Props) {
             }
 
             try {
+                // Check if token exists before attempting to fetch
+                const token = await authService.getToken();
+                if (!token) {
+                    console.log('[ConversationScreen] No auth token available, skipping participants fetch');
+                    return;
+                }
+
                 // Fetch participants
                 const participantsList = await conversationService.getParticipants(Number(conversationId));
                 setParticipants(participantsList);
@@ -109,7 +119,15 @@ export function ConversationScreen({ navigation, route }: Props) {
                     });
                 }
             } catch (error: any) {
-                // Check if token has expired
+                // Gracefully handle auth errors (user logged out, token expired, etc.)
+                if (error?.message?.includes('No authentication token') ||
+                    error?.status === 401 ||
+                    error?.message?.includes('Unauthorized')) {
+                    console.log('[ConversationScreen] Auth token lost, skipping participants fetch');
+                    return; // Exit silently on auth errors
+                }
+
+                // Check if token has expired via handleAuthError for redirect
                 if (handleAuthError(error)) {
                     return; // Token expired, handleAuthError will redirect
                 }
@@ -234,10 +252,11 @@ export function ConversationScreen({ navigation, route }: Props) {
 
             // Create conversation with optional participants via API
             const response = await conversationService.createConversation('1:1', participantIds);
-            const id = response.id;
+            const id = String(response.id);
 
+            // Load the newly created conversation with all its details (participants, messages, etc.)
+            await loadConversation(id);
             setConversationId(id);
-            setCurrentConversation(id);
 
             if (selectedUsers && selectedUsers.length > 0) {
                 console.log(`[ConversationScreen] Created conversation with ${selectedUsers.length} participants`);
@@ -255,10 +274,9 @@ export function ConversationScreen({ navigation, route }: Props) {
     const handleLoadConversation = async (convId: number) => {
         try {
             const id = String(convId);
-            // Load conversation from backend
+            // Load conversation from backend (also sets as current)
             await loadConversation(id);
             setConversationId(id);
-            setCurrentConversation(id);
         } catch (error: any) {
             // Check if token has expired
             if (handleAuthError(error)) {
@@ -310,12 +328,13 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     const { speak, stop, isSpeaking, currentlySpeakingId } = useTextToSpeech();
 
-    console.log(transcript)
+    // Log transcript updates with context
+    useEffect(() => {
+        if (isRecording && transcript && transcript !== 'Listening...') {
+            console.log('[ConversationScreen] Transcript updated (recording):', transcript);
+        }
+    }, [transcript, isRecording]);
 
-    // Note: Loading state is now cleared immediately after sending message,
-    // not waiting for TTS to finish. This improves UX responsiveness.
-
-    // Auto-scroll to bottom when new messages arrive
     useEffect(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
     }, [messages, transcript, isTranscribing]);
@@ -505,10 +524,11 @@ export function ConversationScreen({ navigation, route }: Props) {
                                                             <Pressable
                                                                 key={`caretaker-${index}`}
                                                                 onPress={() => {
-                                                                    Alert.alert(
-                                                                        'Caretaker',
-                                                                        `${participant.username} is caring for this conversation`
-                                                                    );
+                                                                    setSelectedParticipant({
+                                                                        ...participant,
+                                                                        role: 'Caretaker'
+                                                                    });
+                                                                    setShowParticipantModal(true);
                                                                 }}>
                                                                 <View style={[styles.avatarMedium, styles.avatarCaretaker]}>
                                                                     {participant.user?.img_url ? (
@@ -541,10 +561,11 @@ export function ConversationScreen({ navigation, route }: Props) {
                                                             <Pressable
                                                                 key={`user-${index}`}
                                                                 onPress={() => {
-                                                                    Alert.alert(
-                                                                        'Participant',
-                                                                        `${participant.username} is participating in this conversation`
-                                                                    );
+                                                                    setSelectedParticipant({
+                                                                        ...participant,
+                                                                        role: 'Participant'
+                                                                    });
+                                                                    setShowParticipantModal(true);
                                                                 }}>
                                                                 <View style={[styles.avatarMedium, styles.avatarUser]}>
                                                                     {participant.user?.img_url ? (
@@ -595,11 +616,14 @@ export function ConversationScreen({ navigation, route }: Props) {
                                 <View style={styles.emptyStateContainer}>
                                     <View style={styles.emptyStateIconWrapper}>
                                         <View style={styles.emptyStateIconBackground}>
-                                            <Icon name="comments-o" size={72} color={theme.colors.primary} />
+                                            <Icon name="comments-o" size={80} color={theme.colors.primary} />
                                         </View>
                                     </View>
                                     <Text style={styles.emptyStateTitle}>
                                         Let's get started!
+                                    </Text>
+                                    <Text style={styles.emptyStateSubtitle}>
+                                        Create a new conversation or select one from your list
                                     </Text>
                                     {/* Two Action Panels */}
                                     <View style={styles.actionPanelsContainer}>
@@ -607,28 +631,30 @@ export function ConversationScreen({ navigation, route }: Props) {
                                         <Pressable
                                             style={({ pressed }) => [
                                                 styles.actionPanel,
+                                                styles.createPanel,
                                                 pressed && styles.actionPanelPressed,
-                                                { backgroundColor: theme.colors.primary }
                                             ]}
                                             onPress={() => setShowSelectParticipantsForCreate(true)}>
-                                            <View style={[styles.actionPanelIcon, { backgroundColor: `${theme.colors.white}30` }]}>
-                                                <Icon name="plus-circle" size={32} color={theme.colors.white} />
+                                            <View style={[styles.actionPanelIcon, { backgroundColor: `${theme.colors.primary}20` }]}>
+                                                <Icon name="plus-circle" size={36} color={theme.colors.primary} />
                                             </View>
-                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.white, fontSize: 14 }]}>Create</Text>
+                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.text }]}>Create New</Text>
+                                            <Text style={styles.actionPanelDescription}>Start a fresh conversation</Text>
                                         </Pressable>
 
                                         {/* Select Conversation Panel */}
                                         <Pressable
                                             style={({ pressed }) => [
                                                 styles.actionPanel,
+                                                styles.browsePanel,
                                                 pressed && styles.actionPanelPressed,
-                                                { backgroundColor: theme.colors.secondary }
                                             ]}
                                             onPress={() => setShowConversationDrawer(true)}>
-                                            <View style={[styles.actionPanelIcon, { backgroundColor: `${theme.colors.white}30` }]}>
-                                                <Icon name="folder-open" size={32} color={theme.colors.white} />
+                                            <View style={[styles.actionPanelIcon, { backgroundColor: `${theme.colors.secondary}20` }]}>
+                                                <Icon name="folder-open" size={36} color={theme.colors.secondary} />
                                             </View>
-                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.white, fontSize: 14 }]}>Browse</Text>
+                                            <Text style={[styles.actionPanelTitle, { color: theme.colors.text }]}>Browse</Text>
+                                            <Text style={styles.actionPanelDescription}>Open a recent chat</Text>
                                         </Pressable>
                                     </View>
                                 </View>
@@ -726,6 +752,80 @@ export function ConversationScreen({ navigation, route }: Props) {
                         handleCreateConversation(selectedUsers);
                     }}
                 />
+
+                {/* Participant Details Modal */}
+                <Modal
+                    visible={showParticipantModal}
+                    transparent={true}
+                    animationType="fade"
+                    onRequestClose={() => setShowParticipantModal(false)}>
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.participantModalContainer}>
+                            {/* Close Button */}
+                            <Pressable
+                                style={styles.modalCloseButton}
+                                onPress={() => setShowParticipantModal(false)}>
+                                <Icon name="close" size={24} color={theme.colors.text} />
+                            </Pressable>
+
+                            {/* Avatar */}
+                            <View style={[
+                                styles.participantModalAvatar,
+                                selectedParticipant?.role === 'Caretaker'
+                                    ? { borderColor: theme.colors.primary }
+                                    : { borderColor: theme.colors.secondary }
+                            ]}>
+                                {selectedParticipant?.user?.img_url ? (
+                                    <Image
+                                        source={{ uri: selectedParticipant.user.img_url }}
+                                        style={styles.participantModalAvatarImage}
+                                    />
+                                ) : (
+                                    <Image
+                                        source={getAvatarForUser(selectedParticipant?.username || '')}
+                                        style={styles.participantModalAvatarImage}
+                                    />
+                                )}
+                            </View>
+
+                            {/* Name */}
+                            <Text style={styles.participantModalName}>
+                                {selectedParticipant?.username}
+                            </Text>
+
+                            {/* Role Badge */}
+                            <View style={[
+                                styles.participantModalRoleBadge,
+                                selectedParticipant?.role === 'Caretaker'
+                                    ? { backgroundColor: `${theme.colors.primary}15` }
+                                    : { backgroundColor: `${theme.colors.secondary}15` }
+                            ]}>
+                                <Icon
+                                    name={selectedParticipant?.role === 'Caretaker' ? 'user-md' : 'user'}
+                                    size={14}
+                                    color={selectedParticipant?.role === 'Caretaker' ? theme.colors.primary : theme.colors.secondary}
+                                />
+                                <Text style={[
+                                    styles.participantModalRoleText,
+                                    {
+                                        color: selectedParticipant?.role === 'Caretaker'
+                                            ? theme.colors.primary
+                                            : theme.colors.secondary
+                                    }
+                                ]}>
+                                    {selectedParticipant?.role}
+                                </Text>
+                            </View>
+
+                            {/* Description */}
+                            <Text style={styles.participantModalDescription}>
+                                {selectedParticipant?.role === 'Caretaker'
+                                    ? 'Caring for this conversation'
+                                    : 'Participating in this conversation'}
+                            </Text>
+                        </View>
+                    </View>
+                </Modal>
             </SafeAreaView>
         </AppLayout>
     );
@@ -834,8 +934,8 @@ const createStyles = (theme: any) => StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 40,
-        paddingTop: 60,
+        paddingHorizontal: theme.spacing.lg,
+        paddingTop: 40,
     },
     emptyStateIcon: {
         marginBottom: theme.spacing.xl,
@@ -847,22 +947,31 @@ const createStyles = (theme: any) => StyleSheet.create({
         alignItems: 'center',
     },
     emptyStateIconBackground: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: `${theme.colors.primary}20`,
+        width: 140,
+        height: 140,
+        borderRadius: 70,
+        backgroundColor: `${theme.colors.primary}15`,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 2,
-        borderColor: `${theme.colors.primary}40`,
+        borderColor: `${theme.colors.primary}30`,
     },
     emptyStateTitle: {
-        fontSize: 32,
+        fontSize: 36,
         fontWeight: '800',
         color: theme.colors.text,
-        marginBottom: theme.spacing.md,
+        marginBottom: theme.spacing.sm,
         textAlign: 'center',
         letterSpacing: 0.5,
+    },
+    emptyStateSubtitle: {
+        fontSize: 16,
+        fontWeight: '500',
+        color: theme.colors.textSecondary,
+        textAlign: 'center',
+        lineHeight: 24,
+        marginBottom: theme.spacing.xl,
+        maxWidth: 280,
     },
     emptyStateDescription: {
         fontSize: 16,
@@ -873,45 +982,63 @@ const createStyles = (theme: any) => StyleSheet.create({
         maxWidth: 320,
     },
     actionPanelsContainer: {
-        marginTop: theme.spacing.xl,
+        marginTop: theme.spacing.lg,
         gap: theme.spacing.lg,
         width: '100%',
-        flexDirection: 'row',
+        flexDirection: 'column',
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'stretch',
+        maxWidth: 280,
+        alignSelf: 'center',
     },
     actionPanel: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
-        padding: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        padding: theme.spacing.lg,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 6,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
         borderWidth: 0,
+        backgroundColor: theme.colors.white,
+        minHeight: 160,
+    },
+    createPanel: {
+        borderLeftWidth: 4,
+        borderLeftColor: theme.colors.primary,
+    },
+    browsePanel: {
+        borderLeftWidth: 4,
+        borderLeftColor: theme.colors.secondary,
     },
     actionPanelPressed: {
-        opacity: 0.85,
-        transform: [{ scale: 0.95 }],
+        opacity: 0.7,
+        transform: [{ translateY: 2 }],
     },
     actionPanelIcon: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
+        width: 56,
+        height: 56,
+        borderRadius: 12,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: theme.spacing.sm,
+        marginBottom: theme.spacing.md,
     },
     actionPanelTitle: {
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: '700',
         color: theme.colors.text,
         textAlign: 'center',
         letterSpacing: 0.3,
+        marginBottom: theme.spacing.xs,
+    },
+    actionPanelDescription: {
+        fontSize: 13,
+        fontWeight: '400',
+        color: theme.colors.textSecondary,
+        textAlign: 'center',
+        lineHeight: 18,
     },
     actionPanelSubtitle: {
         fontSize: 14,
@@ -995,5 +1122,79 @@ const createStyles = (theme: any) => StyleSheet.create({
         fontFamily: theme.fonts.medium,
         color: theme.colors.text,
         marginTop: theme.spacing.sm,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    participantModalContainer: {
+        backgroundColor: theme.colors.white,
+        borderRadius: theme.borderRadius.xl,
+        paddingVertical: theme.spacing.xl,
+        paddingHorizontal: theme.spacing.lg,
+        alignItems: 'center',
+        width: '85%',
+        maxWidth: 320,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    modalCloseButton: {
+        position: 'absolute',
+        top: theme.spacing.md,
+        right: theme.spacing.md,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: `${theme.colors.primary}10`,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    participantModalAvatar: {
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        borderWidth: 3,
+        overflow: 'hidden',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: theme.spacing.lg,
+        marginBottom: theme.spacing.lg,
+    },
+    participantModalAvatarImage: {
+        width: '100%',
+        height: '100%',
+    },
+    participantModalName: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: theme.colors.text,
+        marginBottom: theme.spacing.sm,
+        textAlign: 'center',
+    },
+    participantModalRoleBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing.sm,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        marginBottom: theme.spacing.md,
+    },
+    participantModalRoleText: {
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    participantModalDescription: {
+        fontSize: 14,
+        fontWeight: '400',
+        color: theme.colors.textSecondary,
+        textAlign: 'center',
+        lineHeight: 20,
     },
 });

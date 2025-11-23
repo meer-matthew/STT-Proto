@@ -1,9 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Image, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { AvatarIcon } from './icons/AvatarIcon';
 import { useTheme } from '../context/ThemeContext';
 import { getAvatarForUser } from '../utils/avatarUtils';
+
+// Detect if device is a tablet based on screen size
+const isTablet = () => {
+    const { width, height } = Dimensions.get('window');
+    const isLandscape = width > height;
+    const diagonal = Math.sqrt(width * width + height * height);
+    return diagonal > 1200; // Tablets typically have diagonal > 1200px
+};
 
 type MessageBubbleProps = {
     name: string;
@@ -204,127 +212,131 @@ export function MessageBubble({
     );
 }
 
-const createStyles = (theme: any) => StyleSheet.create({
-    container: {
-        flexDirection: 'row',
-        marginBottom: 18,
-        paddingHorizontal: theme.spacing.lg,
-        gap: theme.spacing.md,
-    },
-    senderContainer: {
-        flexDirection: 'row-reverse',
-    },
-    avatarContainer: {
-        paddingTop: 0,
-        justifyContent: 'flex-start',
-    },
-    avatar: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-    },
-    bubbleWrapper: {
-        flex: 1,
-        alignItems: 'flex-start',
-    },
-    senderBubbleWrapper: {
-        alignItems: 'flex-end',
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.spacing.sm,
-        marginBottom: 8,
-    },
-    name: {
-        fontSize: 16,
-        fontWeight: '700',
-        fontFamily: theme.fonts.bold,
-        color: theme.colors.text,
-        letterSpacing: 0.3,
-    },
-    time: {
-        fontSize: 13,
-        fontWeight: '400',
-        fontFamily: theme.fonts.regular,
-        color: '#999',
-    },
-    audioButton: {
-        padding: theme.spacing.xs,
-        minWidth: 48,
-        minHeight: 48,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginLeft: 'auto',
-    },
-    audioButtonActive: {
-        backgroundColor: theme.colors.errorLight,
-        borderRadius: theme.borderRadius.sm,
-    },
-    bubble: {
-        backgroundColor: theme.colors.white,
-        borderRadius: 24,
-        borderTopLeftRadius: 6,
-        padding: 28,
-        paddingVertical: 22,
-        maxWidth: '78%',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        elevation: 4,
-    },
-    senderBubble: {
-        backgroundColor: theme.colors.primary,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 6,
-        shadowColor: theme.colors.primary,
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.2,
-        shadowRadius: 10,
-        elevation: 6,
-    },
-    message: {
-        fontSize: 24,
-        fontWeight: '600',
-        fontFamily: theme.fonts.bold,
-        color: theme.colors.text,
-        lineHeight: 36,
-        letterSpacing: 0.3,
-    },
-    senderMessage: {
-        color: theme.colors.white,
-        textShadowColor: 'rgba(0, 0, 0, 0.2)',
-        textShadowOffset: { width: 1, height: 1 },
-        textShadowRadius: 2,
-    },
-    receiverMessage: {
-        color: '#FFFFFF',
-        fontWeight: '700', // Extra bold for contrast
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
-        textShadowOffset: { width: 1, height: 1 },
-        textShadowRadius: 2,
-    },
-    bubblePlaying: {
-        borderWidth: 2.5,
-        borderColor: theme.colors.primary,
-    },
-    messagePlaying: {
-        fontWeight: '600',
-    },
-    bubbleStreaming: {
-        borderWidth: 2,
-        borderColor: theme.colors.primary,
-    },
-    bubbleStreamingSender: {
-        backgroundColor: theme.colors.primary,
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.3)',
-    },
-    streamingDots: {
-        fontSize: 20,
-        fontWeight: '400',
-        color: theme.colors.primary,
-        marginLeft: 6,
-    },
-});
+const createStyles = (theme: any) => {
+    const tablet = isTablet();
+
+    return StyleSheet.create({
+        container: {
+            flexDirection: 'row',
+            marginBottom: tablet ? 28 : 18,
+            paddingHorizontal: theme.spacing.lg,
+            gap: theme.spacing.md,
+        },
+        senderContainer: {
+            flexDirection: 'row-reverse',
+        },
+        avatarContainer: {
+            paddingTop: 0,
+            justifyContent: 'flex-start',
+        },
+        avatar: {
+            width: tablet ? 48 : 32,
+            height: tablet ? 48 : 32,
+            borderRadius: tablet ? 24 : 16,
+        },
+        bubbleWrapper: {
+            flex: 1,
+            alignItems: 'flex-start',
+        },
+        senderBubbleWrapper: {
+            alignItems: 'flex-end',
+        },
+        header: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.spacing.sm,
+            marginBottom: tablet ? 12 : 8,
+        },
+        name: {
+            fontSize: tablet ? 18 : 16,
+            fontWeight: '700',
+            fontFamily: theme.fonts.bold,
+            color: theme.colors.text,
+            letterSpacing: 0.3,
+        },
+        time: {
+            fontSize: tablet ? 14 : 13,
+            fontWeight: '400',
+            fontFamily: theme.fonts.regular,
+            color: '#999',
+        },
+        audioButton: {
+            padding: theme.spacing.xs,
+            minWidth: tablet ? 56 : 48,
+            minHeight: tablet ? 56 : 48,
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginLeft: 'auto',
+        },
+        audioButtonActive: {
+            backgroundColor: theme.colors.errorLight,
+            borderRadius: theme.borderRadius.sm,
+        },
+        bubble: {
+            backgroundColor: theme.colors.white,
+            borderRadius: 24,
+            borderTopLeftRadius: 6,
+            padding: tablet ? 36 : 28,
+            paddingVertical: tablet ? 28 : 22,
+            maxWidth: tablet ? '70%' : '78%',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 8,
+            elevation: 4,
+        },
+        senderBubble: {
+            backgroundColor: theme.colors.primary,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 6,
+            shadowColor: theme.colors.primary,
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.2,
+            shadowRadius: 10,
+            elevation: 6,
+        },
+        message: {
+            fontSize: tablet ? 28 : 24,
+            fontWeight: '600',
+            fontFamily: theme.fonts.bold,
+            color: theme.colors.text,
+            lineHeight: tablet ? 42 : 36,
+            letterSpacing: 0.3,
+        },
+        senderMessage: {
+            color: theme.colors.white,
+            textShadowColor: 'rgba(0, 0, 0, 0.2)',
+            textShadowOffset: { width: 1, height: 1 },
+            textShadowRadius: 2,
+        },
+        receiverMessage: {
+            color: '#FFFFFF',
+            fontWeight: '700', // Extra bold for contrast
+            textShadowColor: 'rgba(0, 0, 0, 0.3)',
+            textShadowOffset: { width: 1, height: 1 },
+            textShadowRadius: 2,
+        },
+        bubblePlaying: {
+            borderWidth: 2.5,
+            borderColor: theme.colors.primary,
+        },
+        messagePlaying: {
+            fontWeight: '600',
+        },
+        bubbleStreaming: {
+            borderWidth: 2,
+            borderColor: theme.colors.primary,
+        },
+        bubbleStreamingSender: {
+            backgroundColor: theme.colors.primary,
+            borderWidth: 2,
+            borderColor: 'rgba(255,255,255,0.3)',
+        },
+        streamingDots: {
+            fontSize: tablet ? 24 : 20,
+            fontWeight: '400',
+            color: theme.colors.primary,
+            marginLeft: 6,
+        },
+    });
+};

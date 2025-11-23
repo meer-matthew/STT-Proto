@@ -43,6 +43,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     const [conversations, setConversations] = useState<Map<string, Conversation>>(new Map());
     const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingConversations, setLoadingConversations] = useState<Set<string>>(new Set());
 
     const fetchUserConversations = async () => {
         setIsLoading(true);
@@ -105,6 +106,10 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
 
     const loadConversation = async (id: string): Promise<void> => {
         try {
+            // Mark conversation as loading to prevent polling from adding duplicates
+            setLoadingConversations(prev => new Set(prev).add(id));
+            console.log('[Context] Starting to load conversation:', id);
+
             // Fetch conversation details from backend
             const apiConversation = await conversationService.getConversation(Number(id));
 
@@ -134,9 +139,22 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             // Add to conversations map and set as current
             setConversations(prev => new Map(prev).set(id, conversation));
             setCurrentConversationId(id);
+            console.log('[Context] Conversation loaded and set as current:', id);
+
+            // Add a small delay to ensure polling has initialized its baseline before we clear the loading flag
+            // This prevents polling from adding messages that were just loaded
+            await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
             console.error('Failed to load conversation:', error);
             throw error;
+        } finally {
+            // Mark conversation as no longer loading
+            setLoadingConversations(prev => {
+                const updated = new Set(prev);
+                updated.delete(id);
+                return updated;
+            });
+            console.log('[Context] Finished loading conversation:', id);
         }
     };
 
@@ -238,9 +256,22 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
                     const conv = prev.get(conversationId);
                     if (!conv) return prev;
 
-                    const updatedMessages = conv.messages.map(msg =>
-                        msg.id === tempMessageId ? backendMessage : msg
+                    // Check if backend message already exists (added via polling before response came back)
+                    const backendMessageExists = conv.messages.some(msg =>
+                        String(msg.id) === String(backendMessage.id)
                     );
+
+                    let updatedMessages;
+                    if (backendMessageExists) {
+                        // Backend message already added via polling, just remove temp message
+                        console.log('[Context] Backend message already exists, removing temp message:', tempMessageId);
+                        updatedMessages = conv.messages.filter(msg => msg.id !== tempMessageId);
+                    } else {
+                        // Backend message not yet added, replace temp with backend
+                        updatedMessages = conv.messages.map(msg =>
+                            msg.id === tempMessageId ? backendMessage : msg
+                        );
+                    }
 
                     return new Map(prev).set(conversationId, {
                         ...conv,
@@ -396,16 +427,29 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
 
     const addReceivedMessage = (conversationId: string, apiMessage: any): string | null => {
         const conversation = conversations.get(conversationId);
-        if (!conversation) return null;
+        if (!conversation) {
+            console.log('[Context] Conversation not found:', conversationId);
+            return null;
+        }
 
-        // Simple deduplication: check if message already exists by backend ID
-        // This is the primary dedup - prevents adding the same backend message twice
-        const messageExists = conversation.messages.some(msg =>
-            String(msg.id) === String(apiMessage.id)
-        );
+        // Skip adding messages if conversation is still loading to prevent race conditions
+        // This prevents polling from adding messages that are already being loaded
+        if (loadingConversations.has(conversationId)) {
+            console.log('[Context] Skipping message during load:', apiMessage.id, '- conversation still loading');
+            return null;
+        }
+
+        // Robust deduplication: check if message already exists
+        // Convert to numbers for comparison to avoid string/number mismatch issues
+        const messageIdNum = Number(apiMessage.id);
+        const messageExists = conversation.messages.some(msg => {
+            const msgIdNum = Number(msg.id);
+            // Match either by numeric ID or exact string ID
+            return msgIdNum === messageIdNum || String(msg.id) === String(apiMessage.id);
+        });
 
         if (messageExists) {
-            console.log('[Context] Message already exists:', apiMessage.id, 'sender:', apiMessage.sender);
+            console.log('[Context] Message already exists:', apiMessage.id, 'sender:', apiMessage.sender, 'existing messages:', conversation.messages.map(m => m.id).slice(-3));
             return null;
         }
 
@@ -426,13 +470,24 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             const conv = prev.get(conversationId);
             if (!conv) return prev;
 
+            // Double-check before adding to prevent any race conditions
+            const stillExists = conv.messages.some(msg => {
+                const msgIdNum = Number(msg.id);
+                return msgIdNum === messageIdNum || String(msg.id) === String(apiMessage.id);
+            });
+
+            if (stillExists) {
+                console.log('[Context] Message already exists (double-check):', apiMessage.id);
+                return prev;
+            }
+
             return new Map(prev).set(conversationId, {
                 ...conv,
                 messages: [...conv.messages, newMessage],
             });
         });
 
-        console.log('[Context] Received message from:', apiMessage.sender, 'Gender:', apiMessage.sender_gender);
+        console.log('[Context] Received message from:', apiMessage.sender, 'ID:', apiMessage.id, 'Gender:', apiMessage.sender_gender);
 
         // Return the message ID so caller can trigger TTS
         return newMessage.id;

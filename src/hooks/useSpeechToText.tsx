@@ -152,21 +152,46 @@ export function useSpeechToText() {
             // Accumulate transcript from streaming chunks
             if (result.transcript && result.transcript.trim()) {
                 const newText = result.transcript.trim();
+                const currentAccumulated = accumulatedTranscriptRef.current;
+
                 console.log('[Streaming] ✓ New transcript chunk:', newText);
+                console.log('[Streaming] Currently accumulated:', currentAccumulated);
+                console.log('[Streaming] Is partial:', result.is_partial);
 
-                // Only add if it's not already in the accumulated transcript (prevent duplicates)
-                if (!accumulatedTranscriptRef.current.endsWith(newText)) {
-                    // Add space if we already have text
-                    if (accumulatedTranscriptRef.current) {
-                        accumulatedTranscriptRef.current += ' ' + newText;
-                    } else {
+                // Check if this is a completely new transcript (not previously seen)
+                // This handles both full and incremental updates from the backend
+                if (currentAccumulated !== newText && !currentAccumulated.includes(newText)) {
+                    // Split incoming text by words to detect new content
+                    const newWords = newText.split(/\s+/);
+                    const accumulatedWords = currentAccumulated.split(/\s+/).filter(w => w);
+
+                    // Find words that are new (not in accumulated)
+                    const addedWords = newWords.filter(word => !accumulatedWords.includes(word));
+
+                    if (addedWords.length > 0) {
+                        // There are new words - update the transcript
+                        if (currentAccumulated && !currentAccumulated.endsWith(' ')) {
+                            accumulatedTranscriptRef.current += ' ' + newText;
+                        } else {
+                            accumulatedTranscriptRef.current = (currentAccumulated ? currentAccumulated + ' ' : '') + newText;
+                        }
+
+                        console.log('[Streaming] ✓ Added new words. Updated transcript:', accumulatedTranscriptRef.current);
+                        setTranscript(accumulatedTranscriptRef.current);
+                    } else if (!currentAccumulated) {
+                        // First chunk
                         accumulatedTranscriptRef.current = newText;
+                        console.log('[Streaming] ✓ First chunk received. Transcript:', accumulatedTranscriptRef.current);
+                        setTranscript(newText);
+                    } else {
+                        console.log('[Streaming] No new words detected in chunk:', newText);
                     }
-
-                    console.log('[Streaming] ✓ Updated transcript:', accumulatedTranscriptRef.current);
-                    setTranscript(accumulatedTranscriptRef.current);
+                } else if (currentAccumulated === newText) {
+                    console.log('[Streaming] Transcript unchanged - same text as before');
+                } else if (currentAccumulated.includes(newText)) {
+                    console.log('[Streaming] New text already in accumulated transcript');
                 } else {
-                    console.log('[Streaming] Transcript already ends with:', newText, '- skipping duplicate');
+                    console.log('[Streaming] Skipping duplicate chunk');
                 }
             } else {
                 console.log('[Streaming] ✗ No transcript in response or empty. Result:', result);
