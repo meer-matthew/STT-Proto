@@ -7,6 +7,7 @@ export type Theme = {
         primaryLight: string;
         secondary: string;
         background: string;
+        backgroundGradient: string[];
         surface: string;
         text: string;
         textSecondary: string;
@@ -63,6 +64,7 @@ const defaultTheme: Theme = {
         primaryLight: '#8885ff',
         secondary: '#5a6470',
         background: '#fff',
+        backgroundGradient: ['#f8f9ff', '#fff5f7'],
         surface: '#f5f5f5',
         text: '#000',
         textSecondary: '#555',

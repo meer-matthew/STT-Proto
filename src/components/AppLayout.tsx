@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { AppHeader } from './AppHeader';
 import { useTheme } from '../context/ThemeContext';
 
@@ -17,11 +18,15 @@ export function AppLayout({ children, showHeader = true, showHeaderBorder = fals
     const theme = useTheme();
 
     return (
-        <View style={styles.container}>
+        <LinearGradient
+            colors={theme.colors.backgroundGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={theme.colors.white} />
             {showHeader && <AppHeader showBorder={showHeaderBorder} navigation={navigation} showAvatar={showAvatar} showMenuButton={showMenuButton} onMenuPress={onMenuPress} />}
             {children}
-        </View>
+        </LinearGradient>
     );
 }
 

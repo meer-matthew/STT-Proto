@@ -242,11 +242,11 @@ export function WelcomeScreen({ navigation }: Props) {
 const createStyles = (theme: any) => StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: theme.colors.white,
+        backgroundColor: 'transparent',
     },
     flex: {
         flex: 1,
-        backgroundColor: theme.colors.white,
+        backgroundColor: 'transparent',
     },
     content: {
         flex: 1,
@@ -294,9 +294,14 @@ const createStyles = (theme: any) => StyleSheet.create({
         height: 56,
         borderRadius: 12,
         backgroundColor: '#F5F5F5',
-        borderWidth: 2,
-        borderColor: '#F5F5F5',
+        borderWidth: 2.5,
+        borderColor: '#E0E0E0',
         paddingHorizontal: theme.spacing.md,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 2,
     },
     inputWrapperFocused: {
         borderColor: theme.colors.primary,
@@ -314,6 +319,7 @@ const createStyles = (theme: any) => StyleSheet.create({
         fontSize: 16,
         color: theme.colors.text,
         paddingVertical: theme.spacing.sm,
+        fontWeight: '700',
     },
     eyeIcon: {
         padding: theme.spacing.xs,

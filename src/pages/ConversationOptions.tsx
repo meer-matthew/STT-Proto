@@ -228,7 +228,7 @@ export function ConversationOptions({ navigation, route }: Props) {
 const createStyles = (theme: any) => StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: theme.colors.white,
+        backgroundColor: 'transparent',
     },
     gradientHeader: {
         paddingTop: 60,
