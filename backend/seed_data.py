@@ -96,59 +96,9 @@ def seed_database(clear_first=False):
             db.session.add_all([user_role1, user_role2, user_role3, user_role4, caregiver_role1, caregiver_role2, caregiver_role3])
             db.session.commit()
 
-        # Always recreate seed conversations and messages
-        print("Creating sample conversations...")
-        # Get or create seeded users
-        user1 = User.query.filter_by(username='john_doe').first()
-        user2 = User.query.filter_by(username='jane_smith').first()
-
-        # Clear existing seeded conversations
-        Conversation.query.filter_by(user_id=user1.id).delete()
-        Conversation.query.filter_by(user_id=user2.id).delete()
-        db.session.commit()
-
-        # Create fresh sample conversations
-        conv1 = Conversation(user_id=user1.id, configuration='1:1')
-        conv2 = Conversation(user_id=user2.id, configuration='2:1')
-
-        db.session.add_all([conv1, conv2])
-        db.session.commit()
-
-        print("Creating sample messages...")
-        # Create sample messages with sender gender for TTS voice selection
-        msg1 = Message(
-            conversation_id=conv1.id,
-            sender=user1.username,
-            sender_type='user',
-            sender_gender='male',  # John Doe
-            message='Hello, this is my first message!',
-            has_audio=False
-        )
-        msg2 = Message(
-            conversation_id=conv1.id,
-            sender='alice_care',
-            sender_type='caregiver',
-            sender_gender='female',  # Alice Care
-            message='Hi! How can I help you today?',
-            has_audio=False
-        )
-        msg3 = Message(
-            conversation_id=conv2.id,
-            sender=user2.username,
-            sender_type='user',
-            sender_gender='female',  # Jane Smith
-            message='Testing speech to text',
-            has_audio=True
-        )
-
-        db.session.add_all([msg1, msg2, msg3])
-        db.session.commit()
-
         print("✅ Database seeded successfully!")
         print(f"Created {User.query.count()} users")
         print(f"Created {Role.query.count()} roles")
-        print(f"Created {Conversation.query.count()} conversations")
-        print(f"Created {Message.query.count()} messages")
 
 if __name__ == '__main__':
     import sys

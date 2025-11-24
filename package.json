@@ -29,6 +29,7 @@
     "react-native-audio-record": "^0.2.2",
     "react-native-device-info": "^14.1.1",
     "react-native-fs": "^2.20.0",
+    "react-native-linear-gradient": "^2.8.3",
     "react-native-network-info": "^5.2.1",
     "react-native-safe-area-context": "^5.6.1",
     "react-native-screens": "^4.16.0",

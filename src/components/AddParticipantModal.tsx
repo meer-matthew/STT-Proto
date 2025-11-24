@@ -8,11 +8,13 @@ import {
     FlatList,
     ActivityIndicator,
     TextInput,
+    Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
 import { authService, User } from '../services/authService';
 import { conversationService } from '../services/conversationService';
+import { getAvatarForUser } from '../utils/avatarUtils';
 
 interface AddParticipantModalProps {
     visible: boolean;
@@ -100,10 +102,11 @@ export function AddParticipantModal({
     const renderUserItem = ({ item }: { item: User }) => (
         <View style={styles.userItem}>
             <View style={styles.userInfo}>
-                <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>
-                        {item.username.charAt(0).toUpperCase()}
-                    </Text>
+                <View style={styles.avatarContainer}>
+                    <Image
+                        source={getAvatarForUser(item.username)}
+                        style={styles.avatar}
+                    />
                 </View>
                 <View style={styles.userDetails}>
                     <Text style={styles.username}>{item.username}</Text>
@@ -256,18 +259,16 @@ const createStyles = (theme: any) => StyleSheet.create({
         gap: theme.spacing.md,
         flex: 1,
     },
+    avatarContainer: {
+        borderRadius: 20,
+        overflow: 'hidden',
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
     avatar: {
         width: 40,
         height: 40,
-        borderRadius: 20,
-        backgroundColor: theme.colors.primary,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarText: {
-        fontSize: theme.fontSize.lg,
-        fontWeight: '600',
-        color: theme.colors.white,
+        borderRadius: 18,
     },
     userDetails: {
         flex: 1,

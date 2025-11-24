@@ -361,11 +361,8 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     const handleMicPress = useCallback(async () => {
         if (isRecording) {
-            // Show transcribing state
             setIsTranscribing(true);
             setIsSendingMessage(true);
-
-            // Stop recording and get the transcribed text directly
             const transcribedText = await stopRecording();
 
             // Automatically send the message when recording stops (with gender for TTS voice selection)
@@ -714,6 +711,7 @@ export function ConversationScreen({ navigation, route }: Props) {
                                 conversationId={conversationId}
                                 onMicPress={handleMicPress}
                                 isRecording={isRecording}
+                                isProcessing={isTranscribing}
                                 onMessageSent={handleMessageSent}
                                 isLoading={isSendingMessage}
                                 onSendStart={() => setIsSendingMessage(true)}

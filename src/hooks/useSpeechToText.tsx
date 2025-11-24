@@ -823,7 +823,6 @@ export function useSpeechToText() {
                 // On-device Voice mode: just stop
                 console.log('[Voice] Stopping recognition...');
                 await Voice.stop();
-                setIsRecording(false);
                 // Transcript will be set by onSpeechResults callback
                 // Return current transcript value
                 return transcript;
@@ -831,7 +830,6 @@ export function useSpeechToText() {
         } catch (err: any) {
             console.error('[STT ERROR] Error stopping recording:', err);
             setError(err.message || 'Failed to process recording');
-            setIsRecording(false);
             return '';
         }
     };

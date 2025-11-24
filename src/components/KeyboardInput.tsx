@@ -9,13 +9,14 @@ type KeyboardInputProps = {
     conversationId: string | null;
     onMicPress: () => void;
     isRecording: boolean;
+    isProcessing?: boolean;
     onMessageSent?: (messageText: string, messageId: string) => void;
     isLoading?: boolean;
     onSendStart?: () => void;
     onSendEnd?: () => void;
 };
 
-export function KeyboardInput({ username, conversationId, onMicPress, isRecording, onMessageSent, isLoading = false, onSendStart, onSendEnd }: KeyboardInputProps) {
+export function KeyboardInput({ username, conversationId, onMicPress, isRecording, isProcessing = false, onMessageSent, isLoading = false, onSendStart, onSendEnd }: KeyboardInputProps) {
     const [text, setText] = useState('');
     const [showKeyboard, setShowKeyboard] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
@@ -123,6 +124,9 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
     };
 
     const handleMicPress = () => {
+        // Don't allow mic press if processing
+        if (isProcessing) return;
+
         // Quick scale animation on press
         Animated.sequence([
             Animated.timing(pulseAnim, {
@@ -160,18 +164,31 @@ export function KeyboardInput({ username, conversationId, onMicPress, isRecordin
                         ]
                     }]}>
                         <TouchableOpacity
-                            style={[styles.largeMicButton, isRecording && styles.largeMicButtonActive]}
+                            style={[
+                                styles.largeMicButton,
+                                isRecording && styles.largeMicButtonActive,
+                                isProcessing && styles.largeMicButtonDisabled
+                            ]}
                             onPress={handleMicPress}
+                            disabled={isProcessing}
                             activeOpacity={0.8}>
                             <Animated.View style={[
                                 styles.micIconWrapper,
                                 isRecording && styles.micIconWrapperActive,
+                                isProcessing && styles.micIconWrapperDisabled,
                             ]}>
-                                <Icon name={isRecording ? "stop-circle" : "microphone"} size={52} color="#fff" />
+                                {isProcessing ? (
+                                    <ActivityIndicator size="large" color="#fff" />
+                                ) : (
+                                    <Icon name={isRecording ? "stop-circle" : "microphone"} size={52} color="#fff" />
+                                )}
                             </Animated.View>
                         </TouchableOpacity>
-                        <Text style={styles.micButtonText}>
-                            {isRecording ? "Stop Recording" : "Tap to Speak"}
+                        <Text style={[
+                            styles.micButtonText,
+                            isProcessing && styles.micButtonTextDisabled
+                        ]}>
+                            {isRecording ? "Stop Recording" : isProcessing ? "Processing..." : "Tap to Speak"}
                         </Text>
                     </Animated.View>
                 </View>
@@ -325,6 +342,16 @@ const createStyles = (theme: any) => StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.35)',
         borderColor: 'rgba(255, 255, 255, 0.4)',
     },
+    largeMicButtonDisabled: {
+        backgroundColor: '#d0d0d0',
+        shadowColor: '#d0d0d0',
+        shadowOpacity: 0.2,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    micIconWrapperDisabled: {
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
     micButtonText: {
         fontSize: 16,
         fontWeight: '800',
@@ -333,6 +360,10 @@ const createStyles = (theme: any) => StyleSheet.create({
         letterSpacing: 1,
         marginTop: theme.spacing.md,
         textAlign: 'center',
+    },
+    micButtonTextDisabled: {
+        color: '#999',
+        fontWeight: '600',
     },
     inputWrapper: {
         flex: 1,

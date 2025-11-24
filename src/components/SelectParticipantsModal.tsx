@@ -9,10 +9,12 @@ import {
     ActivityIndicator,
     TextInput,
     SafeAreaView,
+    Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
 import { authService, User } from '../services/authService';
+import { getAvatarForUser } from '../utils/avatarUtils';
 
 interface SelectParticipantsModalProps {
     visible: boolean;
@@ -97,15 +99,17 @@ export function SelectParticipantsModal({
                 activeOpacity={0.7}>
                 <View style={styles.userInfo}>
                     <View style={[
-                        styles.avatar,
-                        isSelected && styles.avatarSelected
+                        styles.avatarContainer,
+                        isSelected && styles.avatarContainerSelected
                     ]}>
-                        {isSelected ? (
-                            <Icon name="check" size={16} color={theme.colors.white} />
-                        ) : (
-                            <Text style={styles.avatarText}>
-                                {item.username.charAt(0).toUpperCase()}
-                            </Text>
+                        <Image
+                            source={getAvatarForUser(item.username)}
+                            style={styles.avatar}
+                        />
+                        {isSelected && (
+                            <View style={styles.checkOverlay}>
+                                <Icon name="check" size={14} color={theme.colors.white} />
+                            </View>
                         )}
                     </View>
                     <View style={styles.userDetails}>
@@ -302,21 +306,36 @@ const createStyles = (theme: any) => StyleSheet.create({
         gap: theme.spacing.md,
         flex: 1,
     },
+    avatarContainer: {
+        position: 'relative',
+        borderRadius: 20,
+        overflow: 'hidden',
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    avatarContainerSelected: {
+        borderColor: theme.colors.primary,
+        shadowColor: theme.colors.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 3,
+    },
     avatar: {
         width: 40,
         height: 40,
-        borderRadius: 20,
-        backgroundColor: theme.colors.primary,
+        borderRadius: 18,
+    },
+    checkOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        borderRadius: 18,
         justifyContent: 'center',
         alignItems: 'center',
-    },
-    avatarSelected: {
-        backgroundColor: theme.colors.primary,
-    },
-    avatarText: {
-        fontSize: theme.fontSize.lg,
-        fontWeight: '600',
-        color: theme.colors.white,
     },
     userDetails: {
         flex: 1,
