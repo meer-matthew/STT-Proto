@@ -328,13 +328,6 @@ export function ConversationScreen({ navigation, route }: Props) {
 
     const { speak, stop, isSpeaking, currentlySpeakingId } = useTextToSpeech();
 
-    // Log transcript updates with context
-    useEffect(() => {
-        if (isRecording && transcript && transcript !== 'Listening...') {
-            console.log('[ConversationScreen] Transcript updated (recording):', transcript);
-        }
-    }, [transcript, isRecording]);
-
     useEffect(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
     }, [messages, transcript, isTranscribing]);
@@ -365,29 +358,25 @@ export function ConversationScreen({ navigation, route }: Props) {
             setIsSendingMessage(true);
             const transcribedText = await stopRecording();
 
-            // Automatically send the message when recording stops (with gender for TTS voice selection)
+            // Automatically send the message when recording stops
             if (transcribedText.trim() && conversationId) {
                 const messageText = transcribedText.trim();
 
                 try {
-                    // Send message to backend using stream (same as keyboard input)
-                    // Send complete transcription as single message (no streaming)
-                    // This avoids race conditions between streaming and polling
+                    // Send message to backend
                     const messageId = addMessage(conversationId, username, 'user', messageText, true);
 
-                    // Hide transcribing state immediately - don't wait for TTS
+                    // Hide transcribing state immediately
                     setIsTranscribing(false);
                     setIsSendingMessage(false);
 
-                    // Start TTS in parallel without blocking the UI
+                    // Start TTS in parallel
                     if (messageId) {
-                        // Fire TTS immediately (no delay) - it will start rendering
                         speak(messageText, messageId, userGender).catch(err => {
                             console.error('TTS error:', err);
                         });
                     }
                 } catch (error) {
-                    // If there's an error sending, clear loading state immediately
                     setIsTranscribing(false);
                     setIsSendingMessage(false);
                     console.error('Error sending transcribed message:', error);

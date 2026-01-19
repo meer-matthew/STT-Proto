@@ -171,6 +171,31 @@ export function SpeechIndicator({ text, onCancel, isListening = false }: Speakin
         return () => cursorAnimation.stop();
     }, [isListening, cursorOpacity]);
 
+    // Border pulse animation for message preview
+    const borderPulseAnim = useRef(new Animated.Value(1)).current;
+
+    useEffect(() => {
+        if (!hasTranscription) return;
+
+        const borderPulseAnimation = Animated.loop(
+            Animated.sequence([
+                Animated.timing(borderPulseAnim, {
+                    toValue: 0.3,
+                    duration: 800,
+                    useNativeDriver: false, // borderWidth doesn't support native driver
+                }),
+                Animated.timing(borderPulseAnim, {
+                    toValue: 1,
+                    duration: 800,
+                    useNativeDriver: false,
+                }),
+            ])
+        );
+
+        borderPulseAnimation.start();
+        return () => borderPulseAnimation.stop();
+    }, [hasTranscription, borderPulseAnim]);
+
     // Handle word-by-word animation when text changes
     useEffect(() => {
         if (!text || text.trim() === 'Listening...') {
@@ -262,9 +287,22 @@ export function SpeechIndicator({ text, onCancel, isListening = false }: Speakin
 
     // Determine if there's live transcription happening
     const hasTranscription = text && text.trim() !== 'Listening...' && text.trim() !== '';
-    const statusText = isListening
-        ? (hasTranscription ? 'Transcribing Live...' : 'Listening...')
-        : 'Processing...';
+
+    // Show transcript preview in status text (first 40 chars) or default status
+    const getStatusText = () => {
+        console.log("TEXT: ", text)
+        if (!isListening) return 'Processing...';
+        if (hasTranscription) {
+            // Show first few words of the transcript in the status
+            const previewLength = 40;
+            return text.length > previewLength
+                ? text.substring(0, previewLength) + '...'
+                : text;
+        }
+        return 'Listening...';
+    };
+
+    const statusText = getStatusText();
 
     // Render animated words with staggered opacity
     const renderAnimatedText = () => {
@@ -357,8 +395,8 @@ export function SpeechIndicator({ text, onCancel, isListening = false }: Speakin
                         />
                     </View>
 
-                    <Text style={[styles.statusText, hasTranscription && styles.statusTextActive]}>
-                        {statusText}
+                    <Text style={styles.statusLabel}>
+                        {hasTranscription ? 'Recording...' : 'Listening...'}
                     </Text>
 
                     {onCancel && (
@@ -371,16 +409,16 @@ export function SpeechIndicator({ text, onCancel, isListening = false }: Speakin
                     )}
                 </View>
 
-                {/* Live transcription text with animated words and cursor */}
+                {/* Live Transcript Display */}
                 {hasTranscription ? (
-                    <View style={styles.transcriptionContainer}>
-                        <Icon name="quote-left" size={isTablet() && isLandscape() ? 9 : 12} color="rgba(90, 100, 112, 0.3)" />
-                        {renderAnimatedText()}
-                        <Icon name="quote-right" size={isTablet() && isLandscape() ? 9 : 12} color="rgba(90, 100, 112, 0.3)" />
+                    <View style={styles.liveTranscriptContainer}>
+                        <Text style={styles.liveTranscriptText}>
+                            {text}
+                        </Text>
                     </View>
                 ) : (
                     <Text style={styles.listeningPlaceholder}>
-                        {text}
+                        Start speaking...
                     </Text>
                 )}
             </View>
@@ -396,19 +434,16 @@ const createStyles = (theme: any) => {
 
     return StyleSheet.create({
         container: {
-            paddingHorizontal: tabletLandscape ? 12 : 16,
+            paddingHorizontal: theme.spacing.lg,
             marginBottom: tabletLandscape ? 8 : 16,
         },
         bubble: {
             backgroundColor: '#f0f8ff',
             borderRadius: 16,
             padding: tabletLandscape ? 10 : 16,
-            borderWidth: 2,
-            borderColor: '#e0e8f0',
         },
         bubbleActive: {
             backgroundColor: '#e8f4ff',
-            borderColor: '#5a6470',
             shadowColor: '#5a6470',
             shadowOffset: { width: 0, height: 2 },
             shadowOpacity: 0.15,
@@ -442,15 +477,11 @@ const createStyles = (theme: any) => {
         dotActive: {
             backgroundColor: '#5a6470',
         },
-        statusText: {
+        statusLabel: {
             fontSize: tabletLandscape ? 11 : 13,
             fontFamily: theme.fonts.medium,
-            color: '#888',
-            flex: 1,
-            fontWeight: '500',
-        },
-        statusTextActive: {
             color: '#5a6470',
+            flex: 1,
             fontWeight: '600',
         },
         cancelButton: {
@@ -464,10 +495,34 @@ const createStyles = (theme: any) => {
         cancelButtonActive: {
             backgroundColor: '#d32f2f',
         },
+        messagePreview: {
+            marginTop: tabletLandscape ? 6 : 12,
+        },
+        messagePreviewLabel: {
+            fontSize: tabletLandscape ? 10 : 12,
+            fontFamily: theme.fonts.medium,
+            color: '#888',
+            marginBottom: tabletLandscape ? 4 : 6,
+            fontWeight: '500',
+        },
+        messagePreviewBubble: {
+            backgroundColor: theme.colors.primary,
+            borderRadius: 24,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 6, // Sharp corner like sent message
+            padding: tabletLandscape ? 28 : 22,
+            paddingVertical: tabletLandscape ? 22 : 18,
+            maxWidth: '85%',
+            shadowColor: theme.colors.primary,
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.2,
+            shadowRadius: 10,
+            elevation: 6,
+        },
         transcriptionContainer: {
             flexDirection: 'row',
-            alignItems: 'flex-start',
-            gap: tabletLandscape ? 4 : 8,
+            flexWrap: 'wrap',
+            alignItems: 'center',
         },
         text: {
             fontSize: tabletLandscape ? 13 : 16,
@@ -485,18 +540,25 @@ const createStyles = (theme: any) => {
             gap: 0,
         },
         animatedWord: {
-            fontSize: tabletLandscape ? 13 : 16,
-            fontFamily: theme.fonts.regular,
-            color: '#000',
-            fontWeight: '500',
-            lineHeight: tabletLandscape ? 18 : 22,
+            fontSize: tablet ? 28 : 24,
+            fontFamily: theme.fonts.bold,
+            color: theme.colors.white,
+            fontWeight: '600',
+            lineHeight: tablet ? 42 : 36,
+            letterSpacing: 0.3,
+            textShadowColor: 'rgba(0, 0, 0, 0.2)',
+            textShadowOffset: { width: 1, height: 1 },
+            textShadowRadius: 2,
         },
         cursor: {
-            fontSize: tabletLandscape ? 13 : 16,
-            fontFamily: theme.fonts.regular,
-            color: '#5a6470',
+            fontSize: tablet ? 28 : 24,
+            fontFamily: theme.fonts.bold,
+            color: theme.colors.white,
             fontWeight: '600',
             marginLeft: 2,
+            textShadowColor: 'rgba(0, 0, 0, 0.2)',
+            textShadowOffset: { width: 1, height: 1 },
+            textShadowRadius: 2,
         },
         listeningPlaceholder: {
             fontSize: tabletLandscape ? 12 : 15,
@@ -504,6 +566,16 @@ const createStyles = (theme: any) => {
             color: '#999',
             lineHeight: tabletLandscape ? 16 : 20,
             fontStyle: 'italic',
+        },
+        liveTranscriptContainer: {
+            paddingVertical: tabletLandscape ? 8 : 12,
+        },
+        liveTranscriptText: {
+            fontSize: tabletLandscape ? 14 : 16,
+            fontFamily: theme.fonts.medium,
+            color: '#2c3e50',
+            lineHeight: tabletLandscape ? 20 : 24,
+            fontWeight: '500',
         },
     });
 };

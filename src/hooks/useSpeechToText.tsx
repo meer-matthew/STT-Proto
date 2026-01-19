@@ -15,6 +15,7 @@ import AudioRecord from 'react-native-audio-record';
 import RNFS from 'react-native-fs';
 import { API_CONFIG } from '../config/api.config';
 import { authService } from '../services/authService';
+import io, { Socket } from 'socket.io-client';
 
 // Polyfill for btoa in React Native
 const btoa = (str: string): string => {
@@ -37,7 +38,9 @@ const btoa = (str: string): string => {
 // - false (default) = FREE on-device recognition (Google/Apple STT) + LIVE transcription
 // - true = Whisper API ($0.006/min, better quality and consistency) but NO live transcription
 // ============================================================
-// Use Deepgram Streaming for live transcription and audio levels
+// Use WebSocket for real-time streaming (recommended for best performance)
+const USE_WEBSOCKET_STT = API_CONFIG.USE_WEBSOCKET_STT !== undefined ? API_CONFIG.USE_WEBSOCKET_STT : true;
+// Use Deepgram Streaming for live transcription and audio levels (HTTP chunks fallback)
 const USE_DEEPGRAM_STREAMING = true;
 // Fallback to Whisper for complete audio transcription (if streaming fails)
 const USE_WHISPER_API = true;
@@ -50,6 +53,11 @@ export function useSpeechToText() {
     const [audioLevel, setAudioLevel] = useState(0);
     const [hasPermissions, setHasPermissions] = useState(false);
     const [isAudioRecordInitialized, setIsAudioRecordInitialized] = useState(false);
+
+    // WebSocket state
+    const socketRef = useRef<Socket | null>(null);
+    const [isUsingWebSocket, setIsUsingWebSocket] = useState(false);
+    const wsConnectionAttemptedRef = useRef(false);
 
     // Audio level tracking with proper listener management
     const audioLevelListenerRef = useRef<any>(null);
@@ -67,7 +75,7 @@ export function useSpeechToText() {
     // Buffer audio chunks before sending to avoid tiny incomplete fragments
     const audioBufferRef = useRef<string>('');
     const bufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const BUFFER_INTERVAL = 1000; // Send buffered audio every 1000ms (reduced API calls)
+    const BUFFER_INTERVAL = 100; // Send buffered audio every 250ms for near real-time transcription
 
     // Automatic silence detection for stopping recording
     const silenceDetectionTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -108,10 +116,15 @@ export function useSpeechToText() {
                 return;
             }
 
-            console.log('[Streaming] Sending audio chunk to backend, size:', audioData.length, 'bytes');
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.log('📤 SENDING AUDIO TO DEEPGRAM');
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.log('📦 Audio size:', audioData.length, 'bytes');
+            console.log('⏱️  Sent at:', new Date().toISOString());
 
             const endpoint = `${API_CONFIG.BASE_URL}/api/stt/stream-chunk`;
-            console.log('[Streaming] Endpoint:', endpoint);
+            console.log('🌐 Endpoint:', endpoint);
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -127,25 +140,28 @@ export function useSpeechToText() {
                 }),
             });
 
-            console.log('[Streaming] Response status:', response.status);
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.log('📥 RESPONSE FROM DEEPGRAM');
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.log('✅ Status:', response.status);
+            console.log('⏱️  Received at:', new Date().toISOString());
 
             if (!response.ok) {
-                console.error('[Streaming] API error - status:', response.status);
+                console.error('❌ API error - status:', response.status);
                 const errorText = await response.text();
-                console.error('[Streaming] Error response:', errorText);
+                console.error('❌ Error response:', errorText);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
                 return;
             }
 
             let result;
             try {
                 result = await response.json();
-                console.log('[Streaming] Full response received:', JSON.stringify(result, null, 2));
-                console.log('[Streaming] Response keys:', Object.keys(result));
-                console.log('[Streaming] transcript field:', result.transcript);
-                console.log('[Streaming] transcript type:', typeof result.transcript);
-                console.log('[Streaming] transcript length:', result.transcript ? result.transcript.length : 'N/A');
+                console.log('📄 Response:', JSON.stringify(result, null, 2));
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
             } catch (parseErr) {
-                console.warn('[Streaming] Failed to parse response:', parseErr);
+                console.warn('❌ Failed to parse response:', parseErr);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
                 return;
             }
 
@@ -154,9 +170,14 @@ export function useSpeechToText() {
                 const newText = result.transcript.trim();
                 const currentAccumulated = accumulatedTranscriptRef.current;
 
-                console.log('[Streaming] ✓ New transcript chunk:', newText);
-                console.log('[Streaming] Currently accumulated:', currentAccumulated);
-                console.log('[Streaming] Is partial:', result.is_partial);
+                // ========== SPEECH LOGGER ==========
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('🎤 SPEECH DETECTED');
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('📝 NEW CHUNK:', newText);
+                console.log('📚 ACCUMULATED:', currentAccumulated || '(empty)');
+                console.log('🔄 IS PARTIAL:', result.is_partial);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
                 // Check if this is a completely new transcript (not previously seen)
                 // This handles both full and incremental updates from the backend
@@ -176,28 +197,169 @@ export function useSpeechToText() {
                             accumulatedTranscriptRef.current = (currentAccumulated ? currentAccumulated + ' ' : '') + newText;
                         }
 
-                        console.log('[Streaming] ✓ Added new words. Updated transcript:', accumulatedTranscriptRef.current);
-                        setTranscript(accumulatedTranscriptRef.current);
+                        console.log('✅ NEW WORDS ADDED:', addedWords.join(' '));
+                        console.log('📋 FULL TRANSCRIPT:', accumulatedTranscriptRef.current);
+                        console.log('🖥️  UPDATING UI WITH:', accumulatedTranscriptRef.current);
+                        console.log('⏱️  TIMESTAMP:', new Date().toISOString());
+
+                        // CRITICAL: Update transcript state for UI
+                        const newTranscript = accumulatedTranscriptRef.current;
+                        console.log('🔥 CALLING setTranscript() with:', newTranscript);
+                        setTranscript(newTranscript);
+
+                        // Verify state was updated
+                        setTimeout(() => {
+                            console.log('🔍 VERIFY: transcript state should be:', newTranscript);
+                        }, 50);
+
+                        console.log('✔️  UI UPDATED!');
                     } else if (!currentAccumulated) {
                         // First chunk
                         accumulatedTranscriptRef.current = newText;
-                        console.log('[Streaming] ✓ First chunk received. Transcript:', accumulatedTranscriptRef.current);
+                        console.log('✅ FIRST CHUNK:', accumulatedTranscriptRef.current);
+                        console.log('🖥️  UPDATING UI WITH:', newText);
+                        console.log('⏱️  TIMESTAMP:', new Date().toISOString());
                         setTranscript(newText);
+                        console.log('✔️  UI UPDATED!');
                     } else {
-                        console.log('[Streaming] No new words detected in chunk:', newText);
+                        console.log('⚠️  No new words detected in chunk');
                     }
                 } else if (currentAccumulated === newText) {
-                    console.log('[Streaming] Transcript unchanged - same text as before');
+                    console.log('ℹ️  Transcript unchanged - same text');
                 } else if (currentAccumulated.includes(newText)) {
-                    console.log('[Streaming] New text already in accumulated transcript');
+                    console.log('ℹ️  Text already in accumulated transcript');
                 } else {
-                    console.log('[Streaming] Skipping duplicate chunk');
+                    console.log('ℹ️  Skipping duplicate chunk');
                 }
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
             } else {
-                console.log('[Streaming] ✗ No transcript in response or empty. Result:', result);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('🔇 NO SPEECH DETECTED');
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('Response:', JSON.stringify(result, null, 2));
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
             }
         } catch (err) {
             console.error('[Streaming] Unexpected error:', err);
+        }
+    }, []);
+
+    /**
+     * Initialize WebSocket connection for real-time STT streaming
+     */
+    const initializeWebSocket = useCallback((): Promise<boolean> => {
+        return new Promise((resolve) => {
+            if (socketRef.current?.connected) {
+                console.log('[WS] Already connected');
+                resolve(true);
+                return;
+            }
+
+            console.log('[WS] 🔌 Initializing WebSocket connection...');
+            console.log('[WS] URL:', API_CONFIG.ENDPOINTS.STT.WS_STREAM);
+
+            try {
+                const socket = io(API_CONFIG.ENDPOINTS.STT.WS_STREAM, {
+                    transports: ['websocket'],
+                    upgrade: false,
+                    reconnection: false, // Don't auto-reconnect, we'll handle fallback
+                    timeout: 5000, // 5s timeout for initial connection
+                });
+
+                socket.on('connect', () => {
+                    console.log('[WS] ✅ Connected successfully');
+                    setIsUsingWebSocket(true);
+                    wsConnectionAttemptedRef.current = true;
+                    resolve(true);
+                });
+
+                socket.on('connected', (data: any) => {
+                    console.log('[WS] Server ready:', data);
+                });
+
+                socket.on('transcript', (data: any) => {
+                    console.log('[WS] 📝 Transcript received:', data);
+
+                    if (data.transcript && data.transcript.trim()) {
+                        const newText = data.transcript.trim();
+                        const currentAccumulated = accumulatedTranscriptRef.current;
+
+                        console.log('[WS] 🎤 Speech:', newText);
+                        console.log('[WS] Current:', currentAccumulated);
+
+                        // Append new transcript
+                        if (currentAccumulated && !newText.startsWith(currentAccumulated)) {
+                            accumulatedTranscriptRef.current += ' ' + newText;
+                        } else {
+                            accumulatedTranscriptRef.current = newText;
+                        }
+
+                        console.log('[WS] Updated transcript:', accumulatedTranscriptRef.current);
+                        setTranscript(accumulatedTranscriptRef.current);
+                    }
+                });
+
+                socket.on('error', (error: any) => {
+                    console.error('[WS] ❌ Error:', error);
+                    setIsUsingWebSocket(false);
+                    resolve(false);
+                });
+
+                socket.on('connect_error', (error: any) => {
+                    console.error('[WS] ❌ Connection error:', error.message);
+                    setIsUsingWebSocket(false);
+                    wsConnectionAttemptedRef.current = true;
+                    socket.close();
+                    resolve(false);
+                });
+
+                socket.on('disconnect', () => {
+                    console.log('[WS] 🔌 Disconnected');
+                    setIsUsingWebSocket(false);
+                });
+
+                socketRef.current = socket;
+            } catch (error) {
+                console.error('[WS] ❌ Setup error:', error);
+                setIsUsingWebSocket(false);
+                resolve(false);
+            }
+        });
+    }, []);
+
+    /**
+     * Send audio via WebSocket
+     */
+    const sendAudioViaWebSocket = useCallback((audioData: string) => {
+        if (!socketRef.current?.connected) {
+            console.warn('[WS] Not connected, cannot send audio');
+            return false;
+        }
+
+        try {
+            const base64Audio = btoa(audioData);
+            socketRef.current.emit('audio_data', { audio: base64Audio });
+            return true;
+        } catch (error) {
+            console.error('[WS] Error sending audio:', error);
+            return false;
+        }
+    }, []);
+
+    /**
+     * Cleanup WebSocket connection
+     */
+    const cleanupWebSocket = useCallback(() => {
+        if (socketRef.current) {
+            console.log('[WS] 🔌 Closing connection');
+            try {
+                socketRef.current.emit('stop_recording');
+                socketRef.current.close();
+            } catch (error) {
+                console.error('[WS] Cleanup error:', error);
+            }
+            socketRef.current = null;
+            setIsUsingWebSocket(false);
         }
     }, []);
 
@@ -325,7 +487,7 @@ export function useSpeechToText() {
             }
 
             // Buffer audio chunk for periodic transcription
-            if (USE_DEEPGRAM_STREAMING) {
+            if (USE_DEEPGRAM_STREAMING || USE_WEBSOCKET_STT) {
                 // Ensure data is in correct format
                 let audioChunk = data;
                 if (typeof data !== 'string') {
@@ -350,7 +512,14 @@ export function useSpeechToText() {
                         const bufferedAudio = audioBufferRef.current;
                         audioBufferRef.current = '';
                         console.log('[Audio] Sending buffered audio:', bufferedAudio.length, 'bytes');
-                        sendAudioChunkForTranscription(bufferedAudio);
+
+                        // Try WebSocket first, fall back to HTTP
+                        if (isUsingWebSocket && sendAudioViaWebSocket(bufferedAudio)) {
+                            console.log('[Audio] ✅ Sent via WebSocket');
+                        } else {
+                            console.log('[Audio] 📡 Sending via HTTP (WebSocket not available)');
+                            sendAudioChunkForTranscription(bufferedAudio);
+                        }
                     } else {
                         console.log('[Audio] Buffer was empty at timeout');
                     }
@@ -359,7 +528,7 @@ export function useSpeechToText() {
         } catch (err) {
             console.error('[Audio] Error:', err);
         }
-    }, [sendAudioChunkForTranscription]);
+    }, [sendAudioChunkForTranscription, sendAudioViaWebSocket, isUsingWebSocket]);
 
     /**
      * Setup audio level listener (called when starting recording)
@@ -627,12 +796,16 @@ export function useSpeechToText() {
         }
     };
 
+    // TEST MODE: Simulate transcript updates for debugging UI
+    const TEST_MODE = false; // Set to true to simulate transcripts without real audio
+
     const startRecording = async () => {
         console.log('[STT] startRecording called');
         console.log('[STT] hasPermissions:', hasPermissions);
         console.log('[STT] isAvailable:', isAvailable);
         console.log('[STT] isAudioRecordInitialized:', isAudioRecordInitialized);
         console.log('[STT] USE_WHISPER_API:', USE_WHISPER_API);
+        console.log('[STT] TEST_MODE:', TEST_MODE);
 
         // Check if AudioRecord is initialized (only for Whisper API mode)
         if (USE_WHISPER_API && !isAudioRecordInitialized) {
@@ -694,14 +867,51 @@ export function useSpeechToText() {
             setTranscript('Listening...');
 
             if (USE_WHISPER_API) {
-                // Use AudioRecord + Whisper API
+                // Use AudioRecord + Deepgram Streaming
                 setIsRecording(true);
-                AudioRecord.start();
-                console.log('[Whisper] Recording started');
-                console.log('[Whisper] Streaming enabled:', USE_DEEPGRAM_STREAMING);
 
-                // Setup audio level monitoring with proper listener management
-                setupAudioLevelListener();
+                // TEST MODE: Simulate transcript updates
+                if (TEST_MODE) {
+                    console.log('[STT] 🧪 TEST MODE: Simulating transcript updates');
+                    const testWords = ['Hello', 'world', 'this', 'is', 'a', 'test', 'of', 'the', 'speech', 'recognition', 'system'];
+                    let wordIndex = 0;
+
+                    const simulateInterval = setInterval(() => {
+                        if (wordIndex < testWords.length) {
+                            const newTranscript = testWords.slice(0, wordIndex + 1).join(' ');
+                            console.log('[STT] 🧪 Simulating transcript:', newTranscript);
+                            setTranscript(newTranscript);
+                            wordIndex++;
+                        } else {
+                            clearInterval(simulateInterval);
+                        }
+                    }, 500); // Add a word every 500ms
+
+                    // Store interval ID for cleanup
+                    (global as any).__testTranscriptInterval = simulateInterval;
+                } else {
+                    // Real recording mode
+
+                    // Try WebSocket first if enabled
+                    if (USE_WEBSOCKET_STT && !wsConnectionAttemptedRef.current) {
+                        console.log('[STT] 🔌 Attempting WebSocket connection...');
+                        const wsConnected = await initializeWebSocket();
+
+                        if (!wsConnected) {
+                            console.log('[STT] ⚠️ WebSocket connection failed, falling back to HTTP chunks');
+                        } else {
+                            console.log('[STT] ✅ WebSocket connected successfully');
+                        }
+                    }
+
+                    AudioRecord.start();
+                    console.log('[Deepgram] Recording started');
+                    console.log('[Deepgram] Using WebSocket:', isUsingWebSocket);
+                    console.log('[Deepgram] Using HTTP Streaming:', USE_DEEPGRAM_STREAMING);
+
+                    // Setup audio level monitoring with proper listener management
+                    setupAudioLevelListener();
+                }
             } else {
                 // Use on-device Voice recognition
                 console.log('[Voice] Starting recognition...');
@@ -780,9 +990,18 @@ export function useSpeechToText() {
                 }
                 if (audioBufferRef.current && audioBufferRef.current.length > 0) {
                     console.log('[Whisper] Flushing remaining buffer before stop, size:', audioBufferRef.current.length);
-                    await sendAudioChunkForTranscription(audioBufferRef.current);
+
+                    // Send final chunk via WebSocket or HTTP
+                    if (isUsingWebSocket && sendAudioViaWebSocket(audioBufferRef.current)) {
+                        console.log('[Whisper] Final chunk sent via WebSocket');
+                    } else {
+                        await sendAudioChunkForTranscription(audioBufferRef.current);
+                    }
                     audioBufferRef.current = '';
                 }
+
+                // Cleanup WebSocket connection
+                cleanupWebSocket();
 
                 // Whisper API mode: stop AudioRecord and upload
                 const audioFilePath = await AudioRecord.stop();
@@ -845,6 +1064,9 @@ export function useSpeechToText() {
 
             // Cleanup audio level listener
             cleanupAudioLevelListener();
+
+            // Cleanup WebSocket connection
+            cleanupWebSocket();
 
             // Reset accumulated transcript
             accumulatedTranscriptRef.current = '';

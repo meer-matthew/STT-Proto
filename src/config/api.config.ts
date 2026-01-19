@@ -55,8 +55,13 @@ const getBaseUrl = (): string => {
     // Priority 1: Check backend-config.json for current environment
     if (backendConfig.current && backendConfig.backends[backendConfig.current]) {
         const url = backendConfig.backends[backendConfig.current].url;
-        console.log(`🚀 Using ${backendConfig.current} backend:`, url);
-        return url;
+
+        // If URL is "auto-detect", fall through to auto-detection logic
+        if (url !== 'auto-detect') {
+            console.log(`🚀 Using ${backendConfig.current} backend:`, url);
+            return url;
+        }
+        console.log(`🚀 Auto-detecting backend URL...`);
     }
 
     // Priority 2: Check if Render URL is set (for production APK builds)
@@ -86,13 +91,31 @@ const getBaseUrl = (): string => {
     }
 };
 
+// Convert HTTP URL to WebSocket URL
+const getWebSocketUrl = (): string => {
+    const baseUrl = getBaseUrl();
+    const wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+    console.log('🔌 WebSocket URL:', wsUrl);
+    return wsUrl;
+};
+
 export const API_CONFIG = {
     BASE_URL: getBaseUrl(),
+    WS_URL: getWebSocketUrl(),
     AUTH_URL: `${getBaseUrl()}/api/auth`,
     CONVERSATION_URL: `${getBaseUrl()}/api/conversation`,
     TIMEOUT: 30000, // 30 seconds
+    USE_WEBSOCKET_STT: true, // Set to false to use HTTP chunks as fallback
     HOST_IP, // Expose for debugging
     API_PORT, // Expose for debugging
+
+    // Endpoints
+    ENDPOINTS: {
+        STT: {
+            WS_STREAM: `${getWebSocketUrl()}/api/stt/stream`, // WebSocket endpoint
+            STREAM_CHUNK: `${getBaseUrl()}/api/stt/stream-chunk`, // HTTP fallback
+        },
+    },
 };
 
 // Helper to check current configuration

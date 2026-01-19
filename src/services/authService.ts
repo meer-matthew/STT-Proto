@@ -45,10 +45,26 @@ class AuthService {
                 body: JSON.stringify(registerData),
             });
 
-            const data = await response.json();
-
+            // Check if response is ok first
             if (!response.ok) {
-                throw new Error(data.error || 'Registration failed');
+                // Try to parse error message from response
+                let errorMessage = 'Registration failed';
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorData.message || errorMessage;
+                } catch (parseError) {
+                    // If JSON parsing fails, use status text
+                    errorMessage = `Registration failed: ${response.status} ${response.statusText}`;
+                }
+                throw new Error(errorMessage);
+            }
+
+            // Parse successful response
+            let data;
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                throw new Error('Server returned invalid response. Please try again or contact support.');
             }
 
             // Store token and user data with expiration time
@@ -56,8 +72,12 @@ class AuthService {
             await this.storeUser(data.user);
 
             return data;
-        } catch (error) {
+        } catch (error: any) {
             console.error('Registration error:', error);
+            // Provide user-friendly error messages
+            if (error.message.includes('Network request failed') || error.message.includes('fetch')) {
+                throw new Error('Cannot connect to server. Please check your internet connection.');
+            }
             throw error;
         }
     }
@@ -67,6 +87,7 @@ class AuthService {
      */
     async login(username: string, password: string): Promise<LoginResponse> {
         try {
+            console.log('[Auth] Attempting login to:', `${API_URL}/login`);
             const response = await fetch(`${API_URL}/login`, {
                 method: 'POST',
                 headers: {
@@ -75,10 +96,28 @@ class AuthService {
                 body: JSON.stringify({ username, password }),
             });
 
-            const data = await response.json();
+            console.log('[Auth] Login response status:', response.status, response.statusText);
 
+            // Check if response is ok first
             if (!response.ok) {
-                throw new Error(data.error || 'Login failed');
+                // Try to parse error message from response
+                let errorMessage = 'Login failed';
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorData.message || errorMessage;
+                } catch (parseError) {
+                    // If JSON parsing fails, use status text
+                    errorMessage = `Login failed: ${response.status} ${response.statusText}`;
+                }
+                throw new Error(errorMessage);
+            }
+
+            // Parse successful response
+            let data;
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                throw new Error('Server returned invalid response. Please try again or contact support.');
             }
 
             // Store token and user data with expiration time
@@ -86,8 +125,12 @@ class AuthService {
             await this.storeUser(data.user);
 
             return data;
-        } catch (error) {
+        } catch (error: any) {
             console.error('Login error:', error);
+            // Provide user-friendly error messages
+            if (error.message.includes('Network request failed') || error.message.includes('fetch')) {
+                throw new Error('Cannot connect to server. Please check your internet connection.');
+            }
             throw error;
         }
     }
